@@ -10,6 +10,7 @@ Usage:
   pansee cast image <id>             Select and inspect an image (e.g. 'img_01' or 'IMG_0142.CR3')
   pansee cast view grid|graph        Switch view mode between Grid and RDF Graph
   pansee cast instance <id>          Switch active Pan instance (e.g. 'primary-archive', 'studio-2026')
+  pansee cast status "<message>"     Broadcast live pand status (e.g. 'Ingesting 2026/05 (frame 14/28)')
   pansee cast banner "<message>"     Display an agent message banner on the human's screen
   pansee status                      Check if Pan UI server is running and reachable
 """
@@ -92,6 +93,9 @@ def main():
         elif sub == "instance":
             print(f"⚡ Switching Pan Instance: {val}")
             post_cast({"type": "cast_instance", "instanceId": val})
+        elif sub == "status":
+            print(f"⚡ Broadcasting pand status: {val}")
+            post_cast({"type": "pand_status", "task": val, "state": "active"})
         elif sub == "banner":
             print(f"⚡ Casting Agent Banner: {val}")
             post_cast({"type": "cast_sparql", "query": val})

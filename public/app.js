@@ -11,6 +11,21 @@ class PanApp {
     this.selectedImage = this.images[0];
     this.agentCast = null;
 
+    // pand Daemon Live Telemetry State (SQLite Indexing Queue)
+    this.pandTelemetry = {
+      state: 'indexing',
+      currentTask: 'Extracting 4K previews: frame 1,420 of 3,200',
+      activeShoot: '2026/05_studio_dance',
+      runnerStatus: 'Salad 3060: Qwen 27B active',
+      progress: 44.3,
+      queueStats: {
+        discovered: 3420,
+        extracted: 1420,
+        enriched: 840,
+        pending: 1780
+      }
+    };
+
     this.graphViewer = null;
     this.initDOM();
     this.initSSE();
@@ -28,6 +43,13 @@ class PanApp {
     this.gridBtn = document.getElementById('btn-view-grid');
     this.graphBtn = document.getElementById('btn-view-graph');
     this.agentBanner = document.getElementById('agent-banner');
+
+    // pand Status Telemetry DOM
+    this.statusTicker = document.getElementById('pand-status-ticker');
+    this.statusDot = document.getElementById('pand-status-dot');
+    this.statusText = document.getElementById('pand-status-text');
+    this.queueBadge = document.getElementById('pand-queue-badge');
+    this.telemetryDrawer = document.getElementById('telemetry-drawer');
 
     // Sidebar lists
     this.listShoots = document.getElementById('list-shoots');
@@ -59,10 +81,20 @@ class PanApp {
     this.instanceBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this.instanceDrawer.classList.toggle('open');
+      this.telemetryDrawer.classList.remove('open');
+    });
+
+    // Telemetry Drawer Dropdown Click
+    this.statusTicker.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.telemetryDrawer.classList.toggle('open');
+      this.instanceDrawer.classList.remove('open');
+      this.renderTelemetry();
     });
 
     document.addEventListener('click', () => {
       this.instanceDrawer.classList.remove('open');
+      this.telemetryDrawer.classList.remove('open');
     });
 
     // View Toggles
@@ -130,7 +162,69 @@ class PanApp {
       this.setView(event.view);
     } else if (event.type === 'cast_instance') {
       this.switchInstance(event.instanceId);
+    } else if (event.type === 'pand_status') {
+      this.updatePandStatus(event);
     }
+  }
+
+  updatePandStatus(data) {
+    if (data.task) this.pandTelemetry.currentTask = data.task;
+    if (data.state) this.pandTelemetry.state = data.state;
+    if (data.progress !== undefined) this.pandTelemetry.progress = data.progress;
+    if (data.queueDepth !== undefined) this.pandTelemetry.queueStats.pending = data.queueDepth;
+    this.renderTelemetry();
+  }
+
+  renderTelemetry() {
+    const t = this.pandTelemetry;
+    this.statusText.textContent = `pand: ${t.currentTask}`;
+    this.queueBadge.textContent = `${t.queueStats.pending} queued`;
+    this.statusDot.classList.toggle('active', t.state !== 'idle');
+
+    this.telemetryDrawer.innerHTML = `
+      <div class="telemetry-header">
+        <span class="telemetry-title">pand Daemon Telemetry</span>
+        <span style="font-size: 10px; font-family: var(--font-mono); color: var(--accent-cyan);">${t.state.toUpperCase()}</span>
+      </div>
+      <div class="telemetry-task-box">
+        <div style="color: var(--text-primary); font-weight: 600; margin-bottom: 4px;">Current Task</div>
+        <div style="color: var(--text-secondary);">${t.currentTask}</div>
+        <div class="telemetry-progress-bar">
+          <div class="telemetry-progress-fill" style="width: ${t.progress}%;"></div>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-top: 4px; font-family: var(--font-mono);">
+          <span>Shoot: ${t.activeShoot}</span>
+          <span>${t.progress.toFixed(1)}%</span>
+        </div>
+      </div>
+
+      <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px;">
+        SQLite Indexer Queue (~/.pan/queue.db)
+      </div>
+      <div class="queue-grid">
+        <div class="queue-metric">
+          <div class="queue-metric-label">Discovered Files</div>
+          <div class="queue-metric-val">${t.queueStats.discovered.toLocaleString()}</div>
+        </div>
+        <div class="queue-metric">
+          <div class="queue-metric-label">4K Previews Sliced</div>
+          <div class="queue-metric-val">${t.queueStats.extracted.toLocaleString()}</div>
+        </div>
+        <div class="queue-metric">
+          <div class="queue-metric-label">AI Perception Pass</div>
+          <div class="queue-metric-val">${t.queueStats.enriched.toLocaleString()}</div>
+        </div>
+        <div class="queue-metric">
+          <div class="queue-metric-label">Pending Queue Depth</div>
+          <div class="queue-metric-val" style="color: var(--accent-amber);">${t.queueStats.pending.toLocaleString()}</div>
+        </div>
+      </div>
+
+      <div style="font-size: 10px; color: var(--text-muted); border-top: 1px solid var(--border-subtle); padding-top: 8px; display: flex; justify-content: space-between;">
+        <span>Runner: ${t.runnerStatus}</span>
+        <span style="color: var(--accent-emerald);">● Online</span>
+      </div>
+    `;
   }
 
   initShortcuts() {

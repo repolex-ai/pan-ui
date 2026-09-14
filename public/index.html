@@ -40,8 +40,14 @@
       </div>
     </div>
 
-    <!-- View Mode Switcher & Agent Presence -->
+    <!-- pand Live Status Telemetry & Agent Presence -->
     <div class="topbar-right">
+      <div id="pand-status-ticker" class="pand-status-ticker" title="Click to view SQLite Indexing Queue & Runner State">
+        <div id="pand-status-dot" class="pand-status-dot"></div>
+        <span id="pand-status-text">pand: Idle</span>
+        <span id="pand-queue-badge" class="pand-queue-badge">0 queue</span>
+      </div>
+
       <div class="view-mode-toggle">
         <button id="btn-view-grid" class="view-btn active">
           <span>▦</span>
@@ -62,6 +68,9 @@
 
   <!-- ── INSTANCE SELECTION MODAL DRAWER ───────────────────────── -->
   <div id="instance-drawer" class="instance-drawer"></div>
+
+  <!-- ── PAND TELEMETRY & SQLITE QUEUE DRAWER ──────────────────── -->
+  <div id="telemetry-drawer" class="telemetry-drawer"></div>
 
   <!-- ── AGENT CAST NOTIFICATION BANNER ────────────────────────── -->
   <div id="agent-banner" class="agent-banner" style="display: none;"></div>
