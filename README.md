@@ -1,92 +1,88 @@
-# Pan UI (`panV`)
+# pan-ui
 
-> **The Dual-Control Visual Interface for Pan Instances & Semantic Photographic Knowledge Graphs**
+Look through a [Pan](https://github.com/repolex-ai/pan) store fast, and rate it from the keyboard.
 
-`pan-ui` is the visual frontend for exploring, curating, and reasoning over Pan instances. It runs locally as a fast web application or desktop webview, featuring a **dual-control interface** where both humans (via UI gestures and hotkeys) and autonomous AI agents (via the `pansee` command-line tool) steer the shared viewport in real time.
+Pan keeps images and what is known about them in a graph. `pan-ui` shows one store at a time, by
+set or in time order, and lets you mark each image the way Lightroom does: 0 to 5 stars, and a
+white flag (pick), a black flag (reject) or no flag. Marks are saved back to Pan, on the image.
 
----
+It is the Pan counterpart of [git-lex-ui](https://github.com/repolex-ai/git-lex-ui) and
+[ravel-ui](https://github.com/repolex-ai/ravel-ui): one daemon (`pand`) holds every store, and one
+page shows any of them.
 
-## Key Architecture & Features
+## Run it
 
-### 1. Dual-Control Interface (Human + Agent)
-Inspired by the `cosee` / `coquette` interface in Copia:
-* **Human-Driven:** Interactive navigation via shoots ("dumb folders"), disk-backed Photosets (XML), smart collections (SPARQL), and quick single-keypress triage (`1-5`, `P`, `X`, `V`, `Space`).
-* **Agent-Driven (`pansee`):** An LLM or background agent can query Oxigraph, find candidate sets or near-neighbors, and **cast** queries, photosets, or specific images live to the human's screen.
-* **Trust & Shared Context:** Whenever an agent casts to the screen, a high-visibility **Agent Cast Banner** appears, informing the user of the agent's intent (e.g., `⚡ @kira cast SPARQL: ?s pan:rating 5`).
+`pand` must be running (it listens on `127.0.0.1:7401`). Then:
 
-### 2. Local Pan Instance Switcher
-Switch seamlessly between different local `pand` daemons running across your workstation or mesh:
-* 📷 **Studio 2026:** Mode 2 (Referenced Indexer) active dance & portrait sessions (`:7401`).
-* 🗄️ **Primary Archive:** Mode 2 (Referenced Indexer) 1.2M historical photo catalog (`:7402`).
-* 🎨 **Horae Generative Pool:** Mode 1 (Managed Store) agent synthetic renders & LoRA runs (`:7403`).
-
-### 3. Dual View Modes
-* **Gallery Grid Mode:** 120fps responsive image grid with 4K preview inspection, motor-drive burst stack badges (`[⧉ 12]`), star ratings, and pick flags.
-* **RDF Knowledge Graph Mode:** Interactive force-directed graph canvas visualizing relationships between Images, Shoots, Photosets, Subjects/Models, Poses, and Optics via RDF predicates (`pan:inPhotoset`, `pan:hasSubject`, `pan:hasLens`, `pan:poseCategory`).
-
-### 4. The Pan Visual Proxy Inspector
-Side-panel inspector detailing the image's multi-modal perceptual representation:
-* **Aesthetic Consensus:** Dual-model score (Qwen 27B + Gemma) and critique summary.
-* **Kinematics & Pose:** 133-keypoint verification (RTMW) and posture classification.
-* **Segmented Objects:** SAM 3 bounding box proposal tags.
-* **Optics & Color:** Camera, lens, exposure, and Display P3 wide-gamut indicator.
-
----
-
-## Getting Started
-
-### 1. Start the Local Server
-The mock server uses the Python 3 standard library with zero external dependencies:
-
-```bash
-cd repolex-ai/pan-ui
-python3 server.py
+```sh
+cd web && npm install && npm run build && cd ..
+cargo run --release -- --port 8890
 ```
 
-This starts the server at **`http://127.0.0.1:7401`** with Server-Sent Events (SSE) broadcasting enabled.
+The server binds `127.0.0.1:8890` and opens your browser.
 
-### 2. Open in Your Browser
-Visit `http://localhost:7401` in Safari, Chrome, or Arc.
+| Flag | Default | Description |
+|---|---|---|
+| `--port <n>` | `8890` | Port for pan-ui. Fails loudly if taken. |
+| `--daemon-port <n>` | `7401` | Where `pand` listens. |
+| `--data <dir>` | `~/.pan-ui` | Where the store indexes and the save queue are kept. |
+| `--no-open` | `false` | Do not open a browser tab on startup. |
+| `--web <dir>` | `./web/dist` | Frontend build directory, read on every request. |
 
-### 3. Drive the UI with `pansee` (Agent Dual-Control)
-In a separate terminal, use `pansee` to steer the browser window live:
+For frontend work, run `npm run dev` in `web/` as well. Vite serves the page on
+`http://localhost:5175` and forwards `/api` to the server on 8890.
 
-```bash
-# Check server status
-./pansee status
+## Keys
 
-# Cast a SPARQL search filter
-./pansee cast sparql "SELECT ?s WHERE { ?s pan:rating 5 }"
+| Key | Does |
+|---|---|
+| `←` `→` | previous / next image |
+| `↑` `↓` | up / down a row in the grid; previous / next in the full-size view |
+| `Home` `End` `PgUp` `PgDn` | first, last, four rows up or down |
+| `Enter` `Space` | full size, and back |
+| `E` | full size |
+| `G` `Esc` | back to the grid |
+| `1`–`5` | stars |
+| `0` | no stars |
+| `P` | pick (white flag) |
+| `X` | reject (black flag) |
+| `U` | no flag |
+| `Shift` + any mark | mark, then move to the next image |
+| `=` `-` | bigger / smaller thumbnails |
 
-# Cast a specific Photoset
-./pansee cast set s_dance_portfolio_2026
+## What it draws
 
-# Switch view to the interactive RDF Knowledge Graph
-./pansee cast view graph
+- **Left:** the stores `pand` holds, then the sets of the open store, newest first, with a filter.
+  "Everything, in time order" is the whole store.
+- **Middle:** the grid of thumbnails, or one image at full size. A rejected image is dimmed in the
+  grid; stars and flags sit in its corner.
+- **Right:** what Pan knows about the image under the cursor: date, size, model, seed, caption,
+  prompt, and every fact on request. The keys are listed at the bottom.
 
-# Switch view back to the Grid
-./pansee cast view grid
+The address bar carries the store, the set and the image (`#700c5b/<set>/<image>`), so a reload
+comes back to the same place and a view can be sent to someone.
 
-# Select and inspect a specific image
-./pansee cast image img_06
+## How it stays fast
 
-# Switch active Pan instance
-./pansee cast instance primary-archive
-```
+- **The store is indexed once.** Listing every image of a 200,000-image store takes `pand` about
+  ten seconds, so `pan-ui` asks once, keeps the answer (image, date, sets, stars, flag) in memory,
+  and keeps a copy in `~/.pan-ui/index/` so the next start shows the store at once. The copy is
+  disposable. `pan-ui` rebuilds it when `pand` reports a different number of images.
+- **Only the visible rows of the grid exist.** Scrolling through 200,000 thumbnails costs what a
+  screenful costs.
+- **The next images are decoded before you reach them.** The full-size view keeps a small pool of
+  decoded images around the current one, mostly ahead in the direction you are moving, so moving
+  to the next image swaps in pixels that are already there. If you outrun it, the thumbnail stands
+  in until the full image is ready.
+- **A mark does not wait for Pan.** Saving a rating rewrites the image's own metadata, which is
+  right (the rating travels with the file) and too slow to wait for between key presses. A mark
+  updates the page at once and goes into a queue on disk (`~/.pan-ui/queue.json`), which a
+  background task hands to `pand`. If `pand` is down, marks wait in the queue and go when it is
+  back, even after a restart. The top right of the page says whether everything is saved.
 
----
+## What it writes
 
-## File Structure
-
-```
-repolex-ai/pan-ui/
-├── README.md               # Architecture & usage guide
-├── server.py               # Lightweight Python HTTP + SSE broadcast server
-├── pansee                  # Executable CLI tool for agent dual-control
-└── public/                 # Web assets
-    ├── index.html          # Main application shell
-    ├── style.css           # Photography dark theme (Display P3 aware)
-    ├── app.js              # Application state, SPARQL runner, SSE handler
-    ├── graph.js            # Force-directed HTML5 Canvas RDF visualizer
-    └── mock_data.js        # Pan instance configurations, images, proxies, triples
-```
+`pan-ui` writes three properties on images, through `pand`'s `/media/{id}/set` and `/unset`:
+`pan:rating`, `pan:isPicked` and `pan:isRejected`. No stars and no flag are removals, not zeros or
+falses. It reaches no other route that changes anything: not delivery, not deletion, not set
+membership.
