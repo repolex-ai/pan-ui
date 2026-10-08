@@ -12,8 +12,10 @@
     health: Health | null
     onstore: (s: Store) => void
     onset: (set: string | null) => void
+    configOpen: boolean
+    onconfig: () => void
   }
-  let { stores, current, index, set, health, onstore, onset }: Props = $props()
+  let { stores, current, index, set, health, onstore, onset, configOpen, onconfig }: Props = $props()
 
   let filter = $state('')
   const sets = $derived.by(() => {
@@ -85,6 +87,7 @@
   {/if}
 
   <footer>
+    <button class="cfg" class:on={configOpen} onclick={onconfig}>{configOpen ? '← back to images' : 'pand config & prompts'}</button>
     {#if health?.pand}
       pand {health.pand.version} · {health.pand_url.replace('http://', '')}
     {:else if health}
@@ -142,4 +145,6 @@
   .warn { color: var(--warn); font-size: 0.8rem; padding: 0 0.9rem; }
   footer { font-size: 0.7rem; color: var(--ink-faint); padding: 0.5rem 0.9rem; border-top: 1px solid var(--rule); }
   footer .warn { padding: 0; }
+  .cfg { display: block; width: 100%; margin-bottom: 0.45rem; font-size: 0.76rem; text-align: left; }
+  .cfg.on { background: var(--ink); color: var(--paper); }
 </style>

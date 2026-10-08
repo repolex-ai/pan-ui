@@ -62,6 +62,29 @@ For frontend work, run `npm run dev` in `web/` as well. Vite serves the page on
 The address bar carries the store, the set and the image (`#700c5b/<set>/<image>`), so a reload
 comes back to the same place and a view can be sent to someone.
 
+## pand's config and prompts
+
+"pand config & prompts", at the bottom of the left rail, opens pand's own files as plain text:
+`~/.config/pan/config.yml` (the stores, the port, and every model pass: which model, its endpoint,
+its prompt, and the settings sent with each request) and the caption prompts in
+`~/.config/pan/prompts/`. Plain text on purpose: the comments in config.yml carry the reasons
+behind each setting, and a form would lose them.
+
+Saving is careful, because a broken config.yml stops pand from starting:
+
+- A new config.yml is checked with `pand check-config`, pand's own start-time loader, before it
+  is saved. A mistyped key, a wrong value or a missing prompt is refused with pand's message, and
+  the file on disk is not touched.
+- The old file is copied to `~/.config/pan/backups/` first, then the new text is written to a
+  temporary file and renamed into place, so pand only ever finds the old file or the new one.
+- If the file changed on disk after you opened it, the save is refused rather than overwriting it.
+- `auth:` values are hidden in the editor and put back on save.
+- A prompt whose name ends `.default.md` ships with Pan and is rewritten by pand, so it cannot be
+  saved; save your version as a new prompt and point the pass's `prompt:` line at it.
+
+pand reads these files once, when it starts. A saved change takes effect at the next pand restart;
+pan-ui does not restart it.
+
 ## How it stays fast
 
 - **The store is indexed once.** Listing every image of a 200,000-image store takes `pand` about

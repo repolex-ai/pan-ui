@@ -20,6 +20,7 @@ chrono = { version = "0.4", default-features = false, features = ["std", "clock"
 # http-only: every hop this binary makes is to 127.0.0.1.
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 open = "5"
+serde_yaml = "0.9"
 
 [profile.release]
 opt-level = 3

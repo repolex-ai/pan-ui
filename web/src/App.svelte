@@ -4,6 +4,7 @@
   import Grid from './lib/Grid.svelte'
   import Loupe from './lib/Loupe.svelte'
   import Inspector from './lib/Inspector.svelte'
+  import Config from './lib/Config.svelte'
   import { getStores, getIndex, getImages, getHealth, mark } from './lib/api'
   import type { Store, IndexState, Images, Health } from './lib/api'
   import { count } from './lib/format'
@@ -19,7 +20,7 @@
   let images = $state.raw<Images | null>(null)
   let imagesError = $state<string | null>(null)
   let cursor = $state(0)
-  let mode = $state<'grid' | 'loupe'>('grid')
+  let mode = $state<'grid' | 'loupe' | 'config'>('grid')
   let dir = $state(1)
   let cols = $state(1)
   let size = $state(readSize())
@@ -106,6 +107,10 @@
     }
   }
 
+  function toggleConfig() {
+    mode = mode === 'config' ? 'grid' : 'config'
+  }
+
   function openSet(s: string | null) {
     set = s
     cursor = 0
@@ -151,6 +156,9 @@
   function onkey(e: KeyboardEvent) {
     const t = e.target as HTMLElement
     if (t?.tagName === 'INPUT' || t?.tagName === 'TEXTAREA') return
+    // The config editor has its own keys; nothing here may mark an image
+    // that is not even on screen.
+    if (mode === 'config') return
     if (e.metaKey || e.ctrlKey || e.altKey) return
     const adv = e.shiftKey
     const digit = e.code.match(/^(?:Digit|Numpad)([0-5])$/)
@@ -249,10 +257,12 @@
     </span>
   </header>
 
-  <LeftRail {stores} {current} {index} {set} {health} onstore={(s) => openStore(s)} onset={openSet} />
+  <LeftRail {stores} {current} {index} {set} {health} onstore={(s) => openStore(s)} onset={openSet} configOpen={mode === 'config'} onconfig={toggleConfig} />
 
   <main>
-    {#if storesError}
+    {#if mode === 'config'}
+      <Config />
+    {:else if storesError}
       <p class="state warn">Could not list stores: {storesError}</p>
     {:else if imagesError}
       <p class="state warn">{imagesError}</p>

@@ -9,6 +9,7 @@
 //! of each store it has been asked about (`index.rs`), a queue of marks Pan
 //! has not saved yet (`queue.rs`), and otherwise passes requests to pand.
 
+mod config;
 mod index;
 mod pand;
 mod queue;
@@ -107,6 +108,8 @@ async fn main() {
         .route("/api/thumb/{id}", get(api_thumb))
         .route("/api/media/{id}", get(api_media))
         .route("/api/facts/{id}", get(api_facts))
+        .route("/api/config", get(api_config))
+        .route("/api/config/{*name}", axum::routing::put(api_config_save))
         .route("/{*asset}", get(static_asset))
         .with_state(Arc::clone(&state));
 
@@ -514,6 +517,40 @@ async fn api_facts(State(s): S, AxPath(id): AxPath<String>) -> Response {
     match s.pand.get(&format!("/media/{id}/facts")).await {
         Ok(v) => Json(v).into_response(),
         Err(e) => err(StatusCode::BAD_GATEWAY, e),
+    }
+}
+
+/// pand's config file and caption prompts, as text.
+async fn api_config() -> Response {
+    let dir = config::dir();
+    match tokio::task::spawn_blocking(move || config::read_all(&dir)).await {
+        Ok(Ok(files)) => Json(json!({ "dir": config::dir().display().to_string(), "files": files })).into_response(),
+        Ok(Err(e)) => err(StatusCode::NOT_FOUND, e),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct SaveBody {
+    text: String,
+    /// The version the editor loaded; absent to create a new prompt.
+    base: Option<u64>,
+}
+
+/// Save one config file or prompt. pand reads them only at start, so the
+/// reply says so; it is not restarted from here.
+async fn api_config_save(AxPath(name): AxPath<String>, Json(b): Json<SaveBody>) -> Response {
+    let dir = config::dir();
+    let r = tokio::task::spawn_blocking(move || config::save(&dir, &name, &b.text, b.base)).await;
+    match r {
+        Ok(Ok(saved)) => Json(json!({ "ok": true, "saved": saved, "takes_effect": "at the next pand restart" })).into_response(),
+        Ok(Err(config::SaveError::Invalid(e))) => err(StatusCode::UNPROCESSABLE_ENTITY, e),
+        Ok(Err(config::SaveError::Changed)) => err(
+            StatusCode::CONFLICT,
+            "the file changed on disk since you opened it; reload to see the new version (your edit is still in the editor)",
+        ),
+        Ok(Err(config::SaveError::Io(e))) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }
 

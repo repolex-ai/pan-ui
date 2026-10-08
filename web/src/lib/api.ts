@@ -89,3 +89,26 @@ export function mark(store: string, ids: string[], m: { rating?: number; flag?: 
 
 export const thumbUrl = (id: string) => `/api/thumb/${id}`
 export const mediaUrl = (id: string) => `/api/media/${id}`
+
+export interface ConfigFile {
+  name: string
+  kind: 'config' | 'prompt'
+  path: string
+  text: string
+  /** Modification time when read; sent back on save so an edit made
+   *  elsewhere in the meantime is not overwritten. */
+  version: number
+  /** A *.default.md prompt Pan rewrites when it ships a new one. */
+  shipped: boolean
+  used_by: string[]
+}
+
+export const getConfig = () => json<{ dir: string; files: ConfigFile[] }>('/api/config')
+
+/** base: the version the editor loaded, or null to create a new prompt. */
+export function saveConfig(name: string, text: string, base: number | null) {
+  return json<{ ok: boolean; saved: { path: string; version: number; backup: string | null; checked: string | null }; takes_effect: string }>(
+    `/api/config/${name}`,
+    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, base }) },
+  )
+}
