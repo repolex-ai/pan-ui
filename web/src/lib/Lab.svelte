@@ -7,8 +7,9 @@
   interface Props {
     store: Store | null
     image: string | null
+    onopen: (id: string) => void
   }
-  let { store, image }: Props = $props()
+  let { store, image, onopen }: Props = $props()
 
   let current = $state<string | null>(readLab())
   function readLab(): string | null {
@@ -37,7 +38,7 @@
   {/if}
   <div class="stage">
     {#if lab}
-      <lab.view {store} {image} />
+      <lab.view {store} {image} {onopen} />
     {:else}
       <div class="empty">
         <h2>Lab</h2>

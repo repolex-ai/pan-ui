@@ -10,10 +10,14 @@
 
 import type { Component } from 'svelte'
 import type { Store } from '../api'
+import Joystick from './Joystick.svelte'
+import Atlas from './Atlas.svelte'
 
 export interface LabProps {
   store: Store | null
   image: string | null
+  /** Show this image in the Library, full size, in "everything". */
+  onopen: (id: string) => void
 }
 
 export interface LabView {
@@ -24,4 +28,17 @@ export interface LabView {
   view: Component<LabProps>
 }
 
-export const labs: LabView[] = []
+export const labs: LabView[] = [
+  {
+    id: 'atlas',
+    title: 'Atlas',
+    about: 'Every image as a dot, placed by look and coloured by when; zoom in and the dots become pictures',
+    view: Atlas,
+  },
+  {
+    id: 'joystick',
+    title: 'Joystick',
+    about: 'Steer through the store by look: eight directions from any image, along the ways its neighbours differ most',
+    view: Joystick,
+  },
+]

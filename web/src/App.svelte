@@ -210,6 +210,16 @@
     loadImages(keepId, keepT)
   }
 
+  /** From the Lab: the image, full size, in "everything". If the filter
+   *  hides it, the shown image nearest it in time. */
+  function openInLibrary(id: string) {
+    setModule('library')
+    mode = 'loupe'
+    set = null
+    loaded = null
+    loadImages(id, null)
+  }
+
   function move(to: number) {
     if (!images || !images.ids.length) return
     const k = Math.max(0, Math.min(images.ids.length - 1, to))
@@ -436,7 +446,7 @@
       {#if module === 'config'}
         <Config />
       {:else}
-        <Lab store={current} image={images?.ids[cursor] ?? null} />
+        <Lab store={current} image={images?.ids[cursor] ?? null} onopen={openInLibrary} />
       {/if}
     </section>
   {/if}
