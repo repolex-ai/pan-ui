@@ -14,6 +14,7 @@ import Joystick from './Joystick.svelte'
 import Atlas from './Atlas.svelte'
 import Words from './Words.svelte'
 import Mixer from './Mixer.svelte'
+import Echoes from './Echoes.svelte'
 
 export interface LabProps {
   store: Store | null
@@ -54,5 +55,11 @@ export const labs: LabView[] = [
     title: 'Mixer',
     about: 'A recipe of images: more like these, less like those, inside or outside their own sets',
     view: Mixer,
+  },
+  {
+    id: 'echoes',
+    title: 'Echoes',
+    about: 'Pairs that look almost alike but were made weeks apart: then, and now',
+    view: Echoes,
   },
 ]
