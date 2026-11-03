@@ -61,10 +61,16 @@ address as `?m=lab` or `?m=config`.
 
 The Library is laid out like Lightroom's:
 
-- **Left:** the stores `pand` holds, then the sets of the open store, newest first, with a filter.
-  "Everything, newest first" is the whole store. Every set shows its newest image first.
+- **Left:** the stores `pand` holds, then the sets of the open store, folded into months and
+  days by the date of each set's first image. Typing in the box above them lists every set whose
+  name matches, unfolded. "Everything, newest first" is the whole store. Every set shows its
+  newest image first.
 - **Middle:** the grid of thumbnails, or one image at full size. A rejected image is dimmed;
-  stars and flags sit in its corner.
+  stars and flags sit in its corner. The bar above it filters the set: any mix of picked,
+  unflagged and rejected (none chosen shows all), and a star rating that the image's must be at
+  least, at most, or exactly (○ is no stars; click a chosen star again to drop it). The filter
+  stays as you change sets. Mark an image out of the filter and it leaves, and the cursor is on
+  the next one.
 - **Bottom, at full size:** the filmstrip, the whole set as one row, the current image in the
   middle.
 - **Right:** what Pan knows about the image under the cursor, in sections that fold: file, rating,

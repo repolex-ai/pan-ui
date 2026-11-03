@@ -7,6 +7,8 @@
   import Config from './lib/Config.svelte'
   import Filmstrip from './lib/Filmstrip.svelte'
   import Lab from './lib/Lab.svelte'
+  import FilterBar from './lib/FilterBar.svelte'
+  import { apply as applyFilter, readFilter, writeFilter, type Filter } from './lib/filter'
   import { getStores, getIndex, getImages, getHealth, mark } from './lib/api'
   import type { Store, IndexState, Images, Health } from './lib/api'
   import { count } from './lib/format'
@@ -19,7 +21,11 @@
   let set = $state<string | null>(null)
   // Raw, not deep: 200,000-long columns would cost a proxy per element. A
   // mark replaces the column it changes, which is what tells the page.
-  let images = $state.raw<Images | null>(null)
+  // `loaded` is the whole set; `images` is what the filter lets through,
+  // and is what every view and the cursor work on.
+  let loaded = $state.raw<Images | null>(null)
+  let filter = $state<Filter>(readFilter())
+  const images = $derived(loaded ? applyFilter(loaded, filter) : null)
   let imagesError = $state<string | null>(null)
   let cursor = $state(0)
   let mode = $state<'grid' | 'loupe'>('grid')
@@ -108,7 +114,7 @@
     clearTimeout(indexTimer)
     current = s
     index = null
-    images = null
+    loaded = null
     imagesError = null
     set = wantSet
     cursor = 0
@@ -148,14 +154,30 @@
     try {
       const im = newestFirst(await getImages(store, set))
       if (seq !== loadSeq) return
-      images = im
+      loaded = im
       imagesError = null
-      const k = keepId ? im.ids.indexOf(keepId) : -1
-      cursor = k >= 0 ? k : keepT != null ? nearest(im.t, keepT) : 0
-      writeHash()
+      place(keepId, keepT)
     } catch (e) {
       if (seq === loadSeq) imagesError = (e as Error).message
     }
+  }
+
+  /** Put the cursor on keepId if it is shown, else on the shown image
+   *  nearest keepT in time. */
+  function place(keepId: string | null, keepT: number | null) {
+    if (!images) return
+    const k = keepId ? images.ids.indexOf(keepId) : -1
+    cursor = k >= 0 ? k : keepT != null ? nearest(images.t, keepT) : 0
+    writeHash()
+  }
+
+  /** Change the filter and stay with the image, or the nearest one shown. */
+  function setFilter(f: Filter) {
+    const keepId = images?.ids[cursor] ?? null
+    const keepT = images?.t[cursor] ?? null
+    filter = f
+    writeFilter(f)
+    place(keepId, keepT)
   }
 
   /** pand sends a set oldest first; the newest images are what you come to
@@ -184,7 +206,7 @@
     const keepId = images?.ids[cursor] ?? null
     const keepT = images?.t[cursor] ?? null
     set = s
-    images = null
+    loaded = null
     loadImages(keepId, keepT)
   }
 
@@ -198,20 +220,22 @@
 
   /** Change the image's column at once; the server queues it for Pan. */
   function apply(m: { rating?: number; flag?: number }, advance: boolean) {
-    if (!images || !current) return
+    if (!images || !loaded || !current) return
     const i = cursor
     const id = images.ids[i]
     if (!id) return
-    let { rating, flag } = images
-    if (m.rating !== undefined && rating[i] !== m.rating) {
+    // Written to the whole set; the filter then decides whether it stays.
+    const j = images.src ? images.src[i] : i
+    let { rating, flag } = loaded
+    if (m.rating !== undefined && rating[j] !== m.rating) {
       rating = rating.slice()
-      rating[i] = m.rating
+      rating[j] = m.rating
     }
-    if (m.flag !== undefined && flag[i] !== m.flag) {
+    if (m.flag !== undefined && flag[j] !== m.flag) {
       flag = flag.slice()
-      flag[i] = m.flag
+      flag[j] = m.flag
     }
-    images = { ...images, rating, flag }
+    loaded = { ...loaded, rating, flag }
     mark(current.id, [id], m).then(
       (r) => {
         markError = null
@@ -219,7 +243,10 @@
       },
       (e) => (markError = `not saved: ${(e as Error).message}`),
     )
-    if (advance) move(i + 1)
+    // If the mark took the image out of the filter, the next one has
+    // already slid into its place; stepping on would skip it.
+    if (images.ids[i] !== id) move(i)
+    else if (advance) move(i + 1)
   }
 
   function onkey(e: KeyboardEvent) {
@@ -259,6 +286,7 @@
   }
 
   const tally = $derived.by(() => {
+    const images = loaded
     if (!images) return null
     let picked = 0,
       rejected = 0,
@@ -321,6 +349,7 @@
     {#if images && module === 'library'}
       <span class="meta">
         {count(images.ids.length ? cursor + 1 : 0)} / {count(images.ids.length)}
+        {#if images.src && loaded}(filtered from {count(loaded.ids.length)}){/if}
         {#if tally}
           · {count(tally.picked)} picked · {count(tally.rejected)} rejected · {count(tally.rated)} rated
         {/if}
@@ -354,12 +383,16 @@
     </div>
 
     <main>
+      {#if loaded}
+        <FilterBar {filter} shown={images?.ids.length ?? 0} total={loaded.ids.length} onchange={setFilter} />
+      {/if}
+      <div class="stage">
       {#if storesError}
         <p class="state warn">Could not list stores: {storesError}</p>
       {:else if imagesError}
         <p class="state warn">{imagesError}</p>
       {:else if images && images.ids.length === 0}
-        <p class="state">no images</p>
+        <p class="state">{images.src ? 'no image in this set passes the filter' : 'no images'}</p>
       {:else if images}
         {#if mode === 'grid'}
           <Grid {images} {cursor} {size} bind:cols onpick={move} onopen={(i) => (move(i), (mode = 'loupe'))} />
@@ -369,6 +402,7 @@
       {:else if current}
         <p class="state">reading {current.name}…</p>
       {/if}
+      </div>
     </main>
 
     <div class="right">
@@ -443,7 +477,8 @@
   .sep { color: var(--rule-strong); opacity: 0.3; }
 
   .left { grid-column: 2; grid-row: 2 / 4; min-height: 0; overflow: hidden; }
-  main { grid-column: 3; grid-row: 2; position: relative; min-width: 0; min-height: 0; background: var(--stage); }
+  main { grid-column: 3; grid-row: 2; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--stage); }
+  .stage { position: relative; flex: 1; min-height: 0; }
   .right { grid-column: 4; grid-row: 2 / 4; min-height: 0; overflow: hidden; }
   .film { grid-column: 3; grid-row: 3; position: relative; min-width: 0; overflow: hidden; }
   .whole { grid-column: 1 / -1; grid-row: 2 / -1; position: relative; min-height: 0; }
