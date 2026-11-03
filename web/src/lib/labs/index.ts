@@ -15,6 +15,7 @@ import Atlas from './Atlas.svelte'
 import Words from './Words.svelte'
 import Mixer from './Mixer.svelte'
 import Echoes from './Echoes.svelte'
+import Pose from './Pose.svelte'
 
 export interface LabProps {
   store: Store | null
@@ -61,5 +62,11 @@ export const labs: LabView[] = [
     title: 'Echoes',
     about: 'Pairs that look almost alike but were made weeks apart: then, and now',
     view: Echoes,
+  },
+  {
+    id: 'pose',
+    title: 'Pose',
+    about: 'Drag a stick figure; the store answers with the bodies that stand that way',
+    view: Pose,
   },
 ]
