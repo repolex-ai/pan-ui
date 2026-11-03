@@ -218,6 +218,16 @@
     writeHash()
   }
 
+  /** Somewhere else in the set, at random: directed browsing only ever
+   *  shows the newest work, and this brings the rest back into view. Only
+   *  images the filter lets through; never the one already up. */
+  function jump() {
+    const n = images?.ids.length ?? 0
+    if (n < 2) return
+    const k = Math.floor(Math.random() * (n - 1))
+    move(k >= cursor ? k + 1 : k)
+  }
+
   /** Change the image's column at once; the server queues it for Pan. */
   function apply(m: { rating?: number; flag?: number }, advance: boolean) {
     if (!images || !loaded || !current) return
@@ -272,6 +282,7 @@
     else if (e.key === 'ArrowLeft') move(cursor - 1)
     else if (e.key === 'ArrowDown') move(cursor + (mode === 'grid' ? cols : 1))
     else if (e.key === 'ArrowUp') move(cursor - (mode === 'grid' ? cols : 1))
+    else if (e.code === 'KeyR' && !adv) jump()
     else if (e.key === 'Home') move(0)
     else if (e.key === 'End') move(Infinity)
     else if (e.key === 'PageDown' && mode === 'grid') move(cursor + cols * 4)
