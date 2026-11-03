@@ -17,6 +17,7 @@ import Mixer from './Mixer.svelte'
 import Echoes from './Echoes.svelte'
 import Pose from './Pose.svelte'
 import Sets from './Sets.svelte'
+import Diary from './Diary.svelte'
 
 export interface LabProps {
   store: Store | null
@@ -77,5 +78,11 @@ export const labs: LabView[] = [
     title: 'Sets',
     about: 'Every set as a circle where its images sit on the Atlas, joined to the sets it looks most like',
     view: Sets,
+  },
+  {
+    id: 'diary',
+    title: 'Diary',
+    about: "The soul's memory notes from ravel, each beside the images made while it was the latest",
+    view: Diary,
   },
 ]

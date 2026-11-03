@@ -74,6 +74,9 @@ struct AppState {
     words: Mutex<HashMap<String, Arc<Words>>>,
     /// The sets graph, per store, with the index build it was made from.
     set_graphs: Mutex<HashMap<String, (String, Arc<Value>)>>,
+    /// A soul's finest memory notes from raveld, per store, with when they
+    /// were fetched.
+    notes: Mutex<HashMap<String, (std::time::Instant, Arc<Value>)>>,
 }
 
 struct Words {
@@ -110,6 +113,7 @@ async fn main() {
         labs: lab::Labs::default(),
         words: Mutex::new(HashMap::new()),
         set_graphs: Mutex::new(HashMap::new()),
+        notes: Mutex::new(HashMap::new()),
     });
     tokio::spawn(Arc::clone(&queue).drain(pand));
     tokio::spawn(watch(Arc::clone(&state)));
@@ -133,6 +137,7 @@ async fn main() {
         .route("/api/lab/{store}/words", get(api_lab_words))
         .route("/api/lab/{store}/hybrid", post(api_lab_hybrid))
         .route("/api/lab/{store}/sets", get(api_lab_sets))
+        .route("/api/lab/{store}/notes", get(api_lab_notes))
         .route("/api/config", get(api_config))
         .route("/api/config/{*name}", axum::routing::put(api_config_save))
         .route("/{*asset}", get(static_asset))
@@ -973,6 +978,72 @@ async fn api_lab_sets(State(s): S, AxPath(store): AxPath<String>) -> Response {
     }
 }
 
+/// Unix seconds from an RFC 3339 time, as raveld writes them.
+fn rfc3339_secs(x: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(x).ok().map(|d| d.timestamp())
+}
+
+/// Where ravel's daemon listens. A soul's Pan store and its ravel record
+/// share the soul's id, so a store id is also a soul id.
+const RAVELD: &str = "http://127.0.0.1:7881";
+
+/// The soul's finest-grained memory notes (level 0, each a few turns of its
+/// conversation), with the span of time each covers, oldest first. From
+/// raveld's memory graph; kept for ten minutes.
+async fn api_lab_notes(State(s): S, AxPath(store): AxPath<String>) -> Response {
+    if let Err(r) = check(&store) {
+        return r;
+    }
+    if let Some((at, v)) = s.notes.lock().unwrap().get(&store) {
+        if at.elapsed() < Duration::from_secs(600) {
+            return Json(v.as_ref().clone()).into_response();
+        }
+    }
+    let q = "PREFIX r: <https://repolex.ai/ontology/ravel/> \
+             SELECT ?s ?e ?t WHERE { GRAPH <https://repolex.ai/ravel/NamedGraph/memory-v1> { \
+             ?m r:memoryLevel 0 ; r:windowStart ?s ; r:windowEnd ?e ; r:memoryText ?t } } ORDER BY ?s";
+    let reply = reqwest::Client::new()
+        .post(format!("{RAVELD}/souls/{store}/query"))
+        .json(&json!({ "query": q }))
+        .timeout(Duration::from_secs(120))
+        .send()
+        .await;
+    let body: Value = match reply {
+        Ok(r) if r.status().is_success() => match r.json().await {
+            Ok(v) => v,
+            Err(e) => return err(StatusCode::BAD_GATEWAY, format!("raveld's answer was not JSON: {e}")),
+        },
+        Ok(r) => {
+            let code = r.status();
+            let text = r.text().await.unwrap_or_default();
+            return err(StatusCode::NOT_FOUND, format!("raveld has no memory for {store} ({code}): {text}"));
+        }
+        Err(e) => return err(StatusCode::BAD_GATEWAY, format!("raveld is not answering on {RAVELD}: {e}")),
+    };
+    let secs = |v: &Value| v["value"].as_str().and_then(rfc3339_secs);
+    // An answer without a results list is raveld saying something else
+    // (busy, an error in a 200): pass it on rather than keep an empty
+    // diary for ten minutes.
+    let Some(rows) = body["results"]["bindings"].as_array().cloned() else {
+        let head: String = body.to_string().chars().take(300).collect();
+        return err(StatusCode::BAD_GATEWAY, format!("raveld answered without results: {head}"));
+    };
+    let (mut start, mut end, mut text) = (Vec::new(), Vec::new(), Vec::new());
+    for b in &rows {
+        if let (Some(a), Some(z), Some(t)) = (secs(&b["s"]), secs(&b["e"]), b["t"]["value"].as_str()) {
+            start.push(a);
+            end.push(z);
+            text.push(t.to_string());
+        }
+    }
+    let keep = !start.is_empty();
+    let v = Arc::new(json!({ "soul": store, "start": start, "end": end, "text": text }));
+    if keep {
+        s.notes.lock().unwrap().insert(store, (std::time::Instant::now(), Arc::clone(&v)));
+    }
+    Json(v.as_ref().clone()).into_response()
+}
+
 async fn api_config() -> Response {
     let dir = config::dir();
     match tokio::task::spawn_blocking(move || config::read_all(&dir)).await {
@@ -1060,6 +1131,13 @@ mod tests {
         if let Ok(home) = std::env::var("HOME") {
             assert_eq!(store_name(&format!("{home}/.pan")), "~/.pan");
         }
+    }
+
+    #[test]
+    fn reads_raveld_times() {
+        assert_eq!(rfc3339_secs("2026-04-09T16:44:59.221Z"), Some(1775753099));
+        assert_eq!(rfc3339_secs("2026-04-09T16:44:59Z"), Some(1775753099));
+        assert_eq!(rfc3339_secs("nonsense"), None);
     }
 
     #[test]
