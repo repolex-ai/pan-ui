@@ -72,6 +72,8 @@ struct AppState {
     /// Every image's caption, per store, for the Lab's word search: lower
     /// case, read from words.json on first use.
     words: Mutex<HashMap<String, Arc<Words>>>,
+    /// The sets graph, per store, with the index build it was made from.
+    set_graphs: Mutex<HashMap<String, (String, Arc<Value>)>>,
 }
 
 struct Words {
@@ -107,6 +109,7 @@ async fn main() {
         slots: Mutex::new(HashMap::new()),
         labs: lab::Labs::default(),
         words: Mutex::new(HashMap::new()),
+        set_graphs: Mutex::new(HashMap::new()),
     });
     tokio::spawn(Arc::clone(&queue).drain(pand));
     tokio::spawn(watch(Arc::clone(&state)));
@@ -129,6 +132,7 @@ async fn main() {
         .route("/api/lab/{store}/stick/{id}", get(api_lab_stick))
         .route("/api/lab/{store}/words", get(api_lab_words))
         .route("/api/lab/{store}/hybrid", post(api_lab_hybrid))
+        .route("/api/lab/{store}/sets", get(api_lab_sets))
         .route("/api/config", get(api_config))
         .route("/api/config/{*name}", axum::routing::put(api_config_save))
         .route("/{*asset}", get(static_asset))
@@ -889,6 +893,84 @@ async fn api_lab_hybrid(State(s): S, AxPath(store): AxPath<String>, Json(b): Jso
         "looks": looks,
     }))
     .into_response()
+}
+
+/// Every set as one node: where its images sit on the Atlas on average, and
+/// the sets it looks most like (cosine between the sets' mean vectors).
+/// Worked out once per index build and kept.
+async fn api_lab_sets(State(s): S, AxPath(store): AxPath<String>) -> Response {
+    let l = match lab_for(&s, &store).await {
+        Ok(l) => l,
+        Err(r) => return r,
+    };
+    let Some(ix) = s.slots.lock().unwrap().get(&store).and_then(|x| x.index.clone()) else {
+        ensure(&s, &store);
+        return err(StatusCode::SERVICE_UNAVAILABLE, "this store's index is still being built");
+    };
+    let key = format!("{}:{}", ix.read().unwrap().built, l.ids.len());
+    if let Some((k, v)) = s.set_graphs.lock().unwrap().get(&store) {
+        if *k == key {
+            return Json(v.as_ref().clone()).into_response();
+        }
+    }
+    let atlas_path = lab::dir(&s.data, &store).join("atlas.f32");
+    let st = store.clone();
+    let built = tokio::task::spawn_blocking(move || {
+        let atlas: Vec<f32> = std::fs::read(&atlas_path)
+            .map(|raw| raw.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect())
+            .unwrap_or_default();
+        let ix = ix.read().unwrap();
+        let mut nodes = Vec::new();
+        let mut cent: Vec<Vec<f32>> = Vec::new();
+        for (k, info) in ix.sets.iter().enumerate() {
+            let rows: Vec<usize> = ix.members[k]
+                .iter()
+                .filter_map(|&p| l.pos.get(&ix.ids[p as usize]).map(|&r| r as usize))
+                .collect();
+            let mut v = vec![0f32; l.dim];
+            let (mut x, mut y) = (0f32, 0f32);
+            for &r in &rows {
+                v.iter_mut().zip(l.row(r)).for_each(|(a, b)| *a += b);
+                if atlas.len() >= 2 * (r + 1) {
+                    x += atlas[2 * r];
+                    y += atlas[2 * r + 1];
+                }
+            }
+            lab::normalise(&mut v);
+            let m = rows.len().max(1) as f32;
+            nodes.push(json!({
+                "id": info.id, "count": info.count, "first": info.first, "last": info.last,
+                "on_map": rows.len(),
+                "x": if rows.is_empty() { Value::Null } else { json!(x / m) },
+                "y": if rows.is_empty() { Value::Null } else { json!(y / m) },
+                "cover": rows.first().map(|&r| l.ids[r].clone()),
+            }));
+            cent.push(if rows.is_empty() { Vec::new() } else { v });
+        }
+        // Each set's six most alike sets.
+        for i in 0..cent.len() {
+            if cent[i].is_empty() {
+                continue;
+            }
+            let mut best: Vec<(usize, f32)> = (0..cent.len())
+                .filter(|&j| j != i && !cent[j].is_empty())
+                .map(|j| (j, lab::dot(&cent[i], &cent[j])))
+                .collect();
+            best.sort_by(|a, b| b.1.total_cmp(&a.1));
+            best.truncate(6);
+            nodes[i]["near"] = json!(best.iter().map(|&(j, sim)| json!({"i": j, "sim": sim})).collect::<Vec<_>>());
+        }
+        json!({ "store": st, "sets": nodes })
+    })
+    .await;
+    match built {
+        Ok(v) => {
+            let v = Arc::new(v);
+            s.set_graphs.lock().unwrap().insert(store, (key, Arc::clone(&v)));
+            Json(v.as_ref().clone()).into_response()
+        }
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
 }
 
 async fn api_config() -> Response {

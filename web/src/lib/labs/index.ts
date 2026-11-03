@@ -16,12 +16,15 @@ import Words from './Words.svelte'
 import Mixer from './Mixer.svelte'
 import Echoes from './Echoes.svelte'
 import Pose from './Pose.svelte'
+import Sets from './Sets.svelte'
 
 export interface LabProps {
   store: Store | null
   image: string | null
   /** Show this image in the Library, full size, in "everything". */
   onopen: (id: string) => void
+  /** Open this set in the Library's grid. */
+  onset: (set: string) => void
 }
 
 export interface LabView {
@@ -68,5 +71,11 @@ export const labs: LabView[] = [
     title: 'Pose',
     about: 'Drag a stick figure; the store answers with the bodies that stand that way',
     view: Pose,
+  },
+  {
+    id: 'sets',
+    title: 'Sets',
+    about: 'Every set as a circle where its images sit on the Atlas, joined to the sets it looks most like',
+    view: Sets,
   },
 ]

@@ -446,7 +446,7 @@
       {#if module === 'config'}
         <Config />
       {:else}
-        <Lab store={current} image={images?.ids[cursor] ?? null} onopen={openInLibrary} />
+        <Lab store={current} image={images?.ids[cursor] ?? null} onopen={openInLibrary} onset={(s) => (setModule('library'), (mode = 'grid'), openSet(s))} />
       {/if}
     </section>
   {/if}
