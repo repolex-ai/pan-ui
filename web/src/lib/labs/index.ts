@@ -19,6 +19,7 @@ import Pose from './Pose.svelte'
 import Sets from './Sets.svelte'
 import Diary from './Diary.svelte'
 import Facets from './Facets.svelte'
+import Daydream from './Daydream.svelte'
 
 export interface LabProps {
   store: Store | null
@@ -91,5 +92,11 @@ export const labs: LabView[] = [
     title: 'Facets',
     about: 'Every property the images carry, its commonest values as bars, and the images behind each',
     view: Facets,
+  },
+  {
+    id: 'daydream',
+    title: 'Daydream',
+    about: 'The joystick with nobody holding it: a slow drift through the store by look, full screen',
+    view: Daydream,
   },
 ]
