@@ -11,6 +11,7 @@
 
 mod config;
 mod index;
+mod lab;
 mod pand;
 mod queue;
 
@@ -66,6 +67,17 @@ struct AppState {
     /// One slot per store that has been opened. The mutex orders a mark
     /// against an index being swapped in, so neither loses the other.
     slots: Mutex<HashMap<String, Slot>>,
+    /// The Lab's precomputed data, per store, read on first use.
+    labs: lab::Labs,
+    /// Every image's caption, per store, for the Lab's word search: lower
+    /// case, read from words.json on first use.
+    words: Mutex<HashMap<String, Arc<Words>>>,
+}
+
+struct Words {
+    ids: Vec<String>,
+    text: Vec<String>,
+    lower: Vec<String>,
 }
 
 #[derive(Default)]
@@ -93,6 +105,8 @@ async fn main() {
         data: data.clone(),
         web_dir: web_dir.clone(),
         slots: Mutex::new(HashMap::new()),
+        labs: lab::Labs::default(),
+        words: Mutex::new(HashMap::new()),
     });
     tokio::spawn(Arc::clone(&queue).drain(pand));
     tokio::spawn(watch(Arc::clone(&state)));
@@ -109,6 +123,12 @@ async fn main() {
         .route("/api/thumb/{id}", get(api_thumb))
         .route("/api/media/{id}", get(api_media))
         .route("/api/facts/{id}", get(api_facts))
+        .route("/api/lab/{store}/status", get(api_lab_status))
+        .route("/api/lab/{store}/file/{name}", get(api_lab_file))
+        .route("/api/lab/{store}/near", post(api_lab_near))
+        .route("/api/lab/{store}/stick/{id}", get(api_lab_stick))
+        .route("/api/lab/{store}/words", get(api_lab_words))
+        .route("/api/lab/{store}/hybrid", post(api_lab_hybrid))
         .route("/api/config", get(api_config))
         .route("/api/config/{*name}", axum::routing::put(api_config_save))
         .route("/{*asset}", get(static_asset))
@@ -539,6 +559,338 @@ async fn api_facts(State(s): S, AxPath(id): AxPath<String>) -> Response {
 }
 
 /// pand's config file and caption prompts, as text.
+// ------------------------------------------------------------------ the Lab
+
+/// Load a store's Lab data off the async threads: the first read of a big
+/// store is a few hundred megabytes.
+async fn lab_for(s: &Arc<AppState>, store: &str) -> Result<Arc<lab::Lab>, Response> {
+    check(store)?;
+    let s2 = Arc::clone(s);
+    let st = store.to_string();
+    tokio::task::spawn_blocking(move || s2.labs.get(&s2.data, &st))
+        .await
+        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(|e| err(StatusCode::NOT_FOUND, e))
+}
+
+/// What the Lab has for a store, and how far behind pand it is: new
+/// embeddings land all the time, and the Lab's copy is a snapshot.
+async fn api_lab_status(State(s): S, AxPath(store): AxPath<String>) -> Response {
+    if let Err(r) = check(&store) {
+        return r;
+    }
+    let d = lab::dir(&s.data, &store);
+    let meta: Option<Value> = std::fs::read(d.join("meta.json")).ok().and_then(|b| serde_json::from_slice(&b).ok());
+    let files: Vec<&str> = lab::FILES.iter().chain(["words.json"].iter()).copied().filter(|f| d.join(f).exists()).collect();
+    let now = s.pand.get("/health").await.ok().and_then(|h| {
+        h["counts"].as_array()?.iter().find(|c| c["store"] == store.as_str()).map(|c| c["embeddings"].clone())
+    });
+    Json(json!({
+        "store": store,
+        "ready": meta.is_some(),
+        "n": meta.as_ref().map(|m| m["n"].clone()),
+        "dim": meta.as_ref().map(|m| m["dim"].clone()),
+        "built": meta.as_ref().map(|m| m["built"].clone()),
+        "atlas": meta.as_ref().map(|m| m["atlas"].clone()),
+        "files": files,
+        "embeddings_now": now,
+        "rebuild": format!("tools/.venv/bin/python tools/lab_build.py {store} && tools/.venv/bin/python tools/lab_words.py {store}"),
+    }))
+    .into_response()
+}
+
+async fn api_lab_file(State(s): S, AxPath((store, name)): AxPath<(String, String)>) -> Response {
+    if let Err(r) = check(&store) {
+        return r;
+    }
+    if !lab::FILES.contains(&name.as_str()) {
+        return err(StatusCode::NOT_FOUND, format!("the Lab has no file `{name}`"));
+    }
+    match tokio::fs::read(lab::dir(&s.data, &store).join(&name)).await {
+        Ok(b) => {
+            let ct = if name.ends_with(".json") { "application/json" } else { "application/octet-stream" };
+            ([(header::CONTENT_TYPE, ct), (header::CACHE_CONTROL, "no-cache")], b).into_response()
+        }
+        Err(e) => err(StatusCode::NOT_FOUND, format!("{name}: {e}")),
+    }
+}
+
+/// The image ids of the sets that hold `id`, so a search can keep inside
+/// them or out of them.
+fn same_set_ids(s: &AppState, store: &str, id: &str) -> Option<std::collections::HashSet<String>> {
+    let ix = s.slots.lock().unwrap().get(store).and_then(|x| x.index.clone())?;
+    let ix = ix.read().unwrap();
+    let &p = ix.pos.get(id)?;
+    let mut out = std::collections::HashSet::new();
+    for m in &ix.members {
+        if m.binary_search(&p).is_ok() {
+            out.extend(m.iter().map(|&q| ix.ids[q as usize].clone()));
+        }
+    }
+    Some(out)
+}
+
+#[derive(Deserialize)]
+struct NearBody {
+    /// Images to move towards, each with a weight (1 if left out).
+    #[serde(default)]
+    plus: Vec<String>,
+    #[serde(default)]
+    plus_w: Vec<f32>,
+    /// Images to move away from.
+    #[serde(default)]
+    minus: Vec<String>,
+    #[serde(default)]
+    skip: Vec<String>,
+    k: Option<usize>,
+    /// "inside" keeps to the sets that hold plus[0]; "outside" leaves them.
+    scope: Option<String>,
+    /// 0..1: noise added to the query, for wandering.
+    #[serde(default)]
+    jitter: f32,
+}
+
+/// Images like these, and unlike those: the sum of the plus vectors minus
+/// the minus vectors, ranked against every image in the Lab's copy.
+async fn api_lab_near(State(s): S, AxPath(store): AxPath<String>, Json(b): Json<NearBody>) -> Response {
+    let l = match lab_for(&s, &store).await {
+        Ok(l) => l,
+        Err(r) => return r,
+    };
+    if b.plus.is_empty() {
+        return err(StatusCode::BAD_REQUEST, "give at least one image in `plus`");
+    }
+    let mut q = vec![0f32; l.dim];
+    for (i, id) in b.plus.iter().enumerate() {
+        let Some(v) = l.of(id) else { return err(StatusCode::NOT_FOUND, format!("no vector for {id}")) };
+        let w = b.plus_w.get(i).copied().unwrap_or(1.0);
+        q.iter_mut().zip(v).for_each(|(a, x)| *a += w * x);
+    }
+    for id in &b.minus {
+        let Some(v) = l.of(id) else { return err(StatusCode::NOT_FOUND, format!("no vector for {id}")) };
+        q.iter_mut().zip(v).for_each(|(a, x)| *a -= x);
+    }
+    lab::normalise(&mut q);
+    if b.jitter > 0.0 {
+        let mut rng = lab::Rng::new();
+        let sd = b.jitter / (l.dim as f32).sqrt();
+        q.iter_mut().for_each(|a| *a += rng.gauss() * sd);
+        lab::normalise(&mut q);
+    }
+    let mut skip: std::collections::HashSet<usize> =
+        b.plus.iter().chain(&b.minus).chain(&b.skip).filter_map(|id| l.pos.get(id).map(|&p| p as usize)).collect();
+    let k = b.k.unwrap_or(24).min(500);
+    let scope = b.scope.as_deref().unwrap_or("all");
+    if scope != "all" {
+        let Some(same) = same_set_ids(&s, &store, &b.plus[0]) else {
+            ensure(&s, &store);
+            return err(StatusCode::SERVICE_UNAVAILABLE, "this store's index is still being built");
+        };
+        for (i, id) in l.ids.iter().enumerate() {
+            if same.contains(id) != (scope == "inside") {
+                skip.insert(i);
+            }
+        }
+    }
+    let hits: Vec<Value> =
+        l.nearest(&q, k, &skip).into_iter().map(|(i, sim)| json!({"id": l.ids[i], "sim": sim})).collect();
+    Json(json!({ "hits": hits, "of": l.ids.len() })).into_response()
+}
+
+#[derive(Deserialize)]
+struct StickQuery {
+    stride: Option<f32>,
+    fuzz: Option<f32>,
+    /// Comma-separated ids not to land on: where you have been.
+    skip: Option<String>,
+}
+
+/// The joystick: from an image, one step in each of eight directions. The
+/// directions are the two along which the images around it vary most (the
+/// top principal components of its neighbourhood), and their diagonals.
+async fn api_lab_stick(State(s): S, AxPath((store, id)): AxPath<(String, String)>, Query(q): Query<StickQuery>) -> Response {
+    let l = match lab_for(&s, &store).await {
+        Ok(l) => l,
+        Err(r) => return r,
+    };
+    let Some(c) = l.of(&id) else { return err(StatusCode::NOT_FOUND, format!("no vector for {id}")) };
+    let c = c.to_vec();
+    let stride = q.stride.unwrap_or(0.5).clamp(0.05, 3.0);
+    let fuzz = q.fuzz.unwrap_or(0.0).clamp(0.0, 1.0);
+    let [a1, a2] = l.local_axes(&c, 48);
+    let mut skip: std::collections::HashSet<usize> = q
+        .skip
+        .as_deref()
+        .unwrap_or("")
+        .split(',')
+        .filter_map(|x| l.pos.get(x).map(|&p| p as usize))
+        .collect();
+    if let Some(&p) = l.pos.get(&id) {
+        skip.insert(p as usize);
+    }
+    let mut rng = lab::Rng::new();
+    let mut dirs = Vec::new();
+    for (dx, dy) in [(0i8, -1i8), (1, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1)] {
+        let (fx, fy) = (dx as f32, dy as f32);
+        let norm = (fx * fx + fy * fy).sqrt();
+        let mut t: Vec<f32> =
+            (0..l.dim).map(|i| c[i] + stride * (fx * a1[i] + fy * a2[i]) / norm).collect();
+        lab::normalise(&mut t);
+        // Fuzz: pick among the first few matches rather than always the
+        // first, so the same move can land somewhere new.
+        let depth = 1 + (fuzz * 8.0).round() as usize;
+        let near = l.nearest(&t, depth, &skip);
+        if near.is_empty() {
+            continue;
+        }
+        let pick = near[((rng.next() * near.len() as f32) as usize).min(near.len() - 1)];
+        skip.insert(pick.0);
+        dirs.push(json!({"dx": dx, "dy": dy, "id": l.ids[pick.0], "sim": lab::dot(l.row(pick.0), &c)}));
+    }
+    Json(json!({ "centre": id, "dirs": dirs })).into_response()
+}
+
+fn words_for(s: &AppState, store: &str) -> Result<Arc<Words>, String> {
+    if let Some(w) = s.words.lock().unwrap().get(store) {
+        return Ok(Arc::clone(w));
+    }
+    #[derive(Deserialize)]
+    struct Raw {
+        ids: Vec<String>,
+        text: Vec<String>,
+    }
+    let path = lab::dir(&s.data, store).join("words.json");
+    let raw: Raw = serde_json::from_slice(&std::fs::read(&path).map_err(|e| {
+        format!("no captions for store {store} yet ({e}): run tools/.venv/bin/python tools/lab_words.py {store}")
+    })?)
+    .map_err(|e| format!("words.json: {e}"))?;
+    let lower = raw.text.iter().map(|t| t.to_lowercase()).collect();
+    let w = Arc::new(Words { ids: raw.ids, text: raw.text, lower });
+    s.words.lock().unwrap().insert(store.to_string(), Arc::clone(&w));
+    Ok(w)
+}
+
+#[derive(Deserialize)]
+struct WordsQuery {
+    q: String,
+    k: Option<usize>,
+}
+
+/// Images whose caption holds every word of the query; a word starting
+/// with - must not be there. Newest first, because ids are not in time
+/// order but the index knows when each image was made.
+/// Whether a word starts somewhere in the text: "harp" finds "harps", not
+/// "sharp".
+fn has_word(text: &str, word: &str) -> bool {
+    text.match_indices(word).any(|(i, _)| !text[..i].chars().next_back().is_some_and(|c| c.is_alphanumeric()))
+}
+
+fn word_hits(s: &AppState, store: &str, q: &str, k: usize) -> Result<(Vec<String>, usize), String> {
+    let w = words_for(s, store)?;
+    let (mut need, mut not) = (Vec::new(), Vec::new());
+    for t in q.to_lowercase().split_whitespace() {
+        match t.strip_prefix('-') {
+            Some(x) if !x.is_empty() => not.push(x.to_string()),
+            _ => need.push(t.to_string()),
+        }
+    }
+    if need.is_empty() {
+        return Err("give at least one word".into());
+    }
+    let hits: Vec<usize> = (0..w.ids.len())
+        .filter(|&i| need.iter().all(|t| has_word(&w.lower[i], t)) && !not.iter().any(|t| has_word(&w.lower[i], t)))
+        .collect();
+    let total = hits.len();
+    let when = |id: &str| -> i64 {
+        s.slots.lock().unwrap().get(store).and_then(|x| x.index.clone()).and_then(|ix| {
+            let ix = ix.read().unwrap();
+            ix.pos.get(id).map(|&p| ix.t[p as usize])
+        }).unwrap_or(0)
+    };
+    let mut ranked: Vec<(i64, &String)> = hits.iter().map(|&i| (when(&w.ids[i]), &w.ids[i])).collect();
+    ranked.sort_by(|a, b| b.0.cmp(&a.0));
+    Ok((ranked.into_iter().take(k).map(|(_, id)| id.clone()).collect(), total))
+}
+
+async fn api_lab_words(State(s): S, AxPath(store): AxPath<String>, Query(q): Query<WordsQuery>) -> Response {
+    if let Err(r) = check(&store) {
+        return r;
+    }
+    ensure(&s, &store);
+    let k = q.k.unwrap_or(60).min(1000);
+    let s2 = Arc::clone(&s);
+    let res = tokio::task::spawn_blocking(move || {
+        let r = word_hits(&s2, &store, &q.q, k)?;
+        let w = words_for(&s2, &store)?;
+        let pos: HashMap<&str, usize> = w.ids.iter().enumerate().map(|(i, x)| (x.as_str(), i)).collect();
+        let caps: Vec<&str> = r.0.iter().map(|id| pos.get(id.as_str()).map(|&i| w.text[i].as_str()).unwrap_or("")).collect();
+        Ok::<Value, String>(json!({"ids": r.0, "captions": caps, "total": r.1}))
+    })
+    .await;
+    match res {
+        Ok(Ok(v)) => Json(v).into_response(),
+        Ok(Err(e)) => err(StatusCode::NOT_FOUND, e),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct HybridBody {
+    q: String,
+    k: Option<usize>,
+    /// How many caption matches make the seed.
+    seeds: Option<usize>,
+}
+
+/// Words, then looks: the images whose captions match, then the images
+/// that look like them (the mean of the matches' vectors) whose captions do
+/// not match at all. The second list is what a word search alone never
+/// finds.
+async fn api_lab_hybrid(State(s): S, AxPath(store): AxPath<String>, Json(b): Json<HybridBody>) -> Response {
+    ensure(&s, &store);
+    let l = match lab_for(&s, &store).await {
+        Ok(l) => l,
+        Err(r) => return r,
+    };
+    let s2 = Arc::clone(&s);
+    let st = store.clone();
+    let q = b.q.clone();
+    let words = match tokio::task::spawn_blocking(move || word_hits(&s2, &st, &q, 100_000)).await {
+        Ok(Ok(w)) => w,
+        Ok(Err(e)) => return err(StatusCode::NOT_FOUND, e),
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    };
+    let (said, total) = words;
+    // Seeds spread evenly through the matches, oldest to newest: the
+    // vectors cluster hard by the batch an image was made in, so forty
+    // seeds from one evening would only find that evening again.
+    let have: Vec<usize> = said.iter().filter_map(|id| l.pos.get(id).map(|&p| p as usize)).collect();
+    let want = b.seeds.unwrap_or(40).min(have.len());
+    let seeds: Vec<usize> = (0..want).map(|j| have[j * have.len() / want.max(1)]).collect();
+    if seeds.is_empty() {
+        return Json(json!({"said": said.iter().take(60).collect::<Vec<_>>(), "total": total, "looks": [], "seeds": 0}))
+            .into_response();
+    }
+    let mut q = vec![0f32; l.dim];
+    for &i in &seeds {
+        q.iter_mut().zip(l.row(i)).for_each(|(a, x)| *a += x);
+    }
+    lab::normalise(&mut q);
+    let said_set: std::collections::HashSet<&str> = said.iter().map(|x| x.as_str()).collect();
+    let skip: std::collections::HashSet<usize> =
+        l.ids.iter().enumerate().filter(|(_, id)| said_set.contains(id.as_str())).map(|(i, _)| i).collect();
+    let k = b.k.unwrap_or(60).min(500);
+    let looks: Vec<Value> =
+        l.nearest(&q, k, &skip).into_iter().map(|(i, sim)| json!({"id": l.ids[i], "sim": sim})).collect();
+    Json(json!({
+        "said": said.iter().take(k).collect::<Vec<_>>(),
+        "total": total,
+        "seeds": seeds.len(),
+        "looks": looks,
+    }))
+    .into_response()
+}
+
 async fn api_config() -> Response {
     let dir = config::dir();
     match tokio::task::spawn_blocking(move || config::read_all(&dir)).await {
@@ -626,5 +978,14 @@ mod tests {
         if let Ok(home) = std::env::var("HOME") {
             assert_eq!(store_name(&format!("{home}/.pan")), "~/.pan");
         }
+    }
+
+    #[test]
+    fn words_match_at_their_start() {
+        assert!(has_word("a small harp", "harp"));
+        assert!(has_word("two harps", "harp"));
+        assert!(has_word("harp at the start", "harp"));
+        assert!(!has_word("a sharp edge", "harp"));
+        assert!(has_word("a sharp edge and a harp", "harp"));
     }
 }
