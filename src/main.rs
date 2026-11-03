@@ -105,6 +105,7 @@ async fn main() {
         .route("/api/stores/{store}/images", get(api_images))
         .route("/api/stores/{store}/marks", post(api_marks))
         .route("/api/stores/{store}/rebuild", post(api_rebuild))
+        .route("/api/stores/{store}/sets-of/{id}", get(api_sets_of))
         .route("/api/thumb/{id}", get(api_thumb))
         .route("/api/media/{id}", get(api_media))
         .route("/api/facts/{id}", get(api_facts))
@@ -427,6 +428,23 @@ async fn api_images(State(s): S, AxPath(store): AxPath<String>, Query(q): Query<
         "flag": pick.iter().map(|&p| ix.flag[p]).collect::<Vec<_>>(),
     }))
     .into_response()
+}
+
+/// Which sets of the store hold this image: the right panel's "Sets", and
+/// how a set is opened on the image already under the cursor.
+async fn api_sets_of(State(s): S, AxPath((store, id)): AxPath<(String, String)>) -> Response {
+    if let Err(r) = check(&store).and_then(|_| check(&id)) {
+        return r;
+    }
+    let ix = {
+        let slots = s.slots.lock().unwrap();
+        slots.get(&store).and_then(|x| x.index.clone())
+    };
+    let Some(ix) = ix else {
+        return err(StatusCode::SERVICE_UNAVAILABLE, "this store's index is still being built");
+    };
+    let ix = ix.read().unwrap();
+    Json(json!({ "id": id, "sets": ix.sets_of(&id) })).into_response()
 }
 
 #[derive(Deserialize)]

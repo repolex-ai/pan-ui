@@ -3,7 +3,7 @@
 Look through a [Pan](https://github.com/repolex-ai/pan) store fast, and rate it from the keyboard.
 
 Pan keeps images and what is known about them in a graph. `pan-ui` shows one store at a time, by
-set or in time order, and lets you mark each image the way Lightroom does: 0 to 5 stars, and a
+set or all of it, newest image first, and lets you mark each image the way Lightroom does: 0 to 5 stars, and a
 white flag (pick), a black flag (reject) or no flag. Marks are saved back to Pan, on the image.
 
 It is the Pan counterpart of [git-lex-ui](https://github.com/repolex-ai/git-lex-ui) and
@@ -49,22 +49,40 @@ For frontend work, run `npm run dev` in `web/` as well. Vite serves the page on
 | `U` | no flag |
 | `Shift` + any mark | mark, then move to the next image |
 | `=` `-` | bigger / smaller thumbnails |
+| `Tab` | hide / show both side panels |
+| `Shift` + `Tab` | hide / show every panel, filmstrip included |
 
 ## What it draws
 
+The top bar switches between three modules, each taking the whole screen: **Library** (the
+viewer, below), **Lab** (development views that do not fit the Library layout, listed in
+`web/src/lib/labs/index.ts`) and **Config** (pand's own files, below). The module is in the
+address as `?m=lab` or `?m=config`.
+
+The Library is laid out like Lightroom's:
+
 - **Left:** the stores `pand` holds, then the sets of the open store, newest first, with a filter.
-  "Everything, in time order" is the whole store.
-- **Middle:** the grid of thumbnails, or one image at full size. A rejected image is dimmed in the
-  grid; stars and flags sit in its corner.
-- **Right:** what Pan knows about the image under the cursor: date, size, model, seed, caption,
-  prompt, and every fact on request. The keys are listed at the bottom.
+  "Everything, newest first" is the whole store. Every set shows its newest image first.
+- **Middle:** the grid of thumbnails, or one image at full size. A rejected image is dimmed;
+  stars and flags sit in its corner.
+- **Bottom, at full size:** the filmstrip, the whole set as one row, the current image in the
+  middle.
+- **Right:** what Pan knows about the image under the cursor, in sections that fold: file, rating,
+  the sets that hold it, and every fact. Description and Generation (prompt, model, seed) appear
+  only for images that have such facts, so a store of screenshots shows neither.
+
+Each panel puts itself away with the triangle on its edge of the screen, and stays put away
+after a reload. So does each folded section.
+
+Switching sets keeps your place. If the new set holds the image under the cursor ("everything"
+always does), it stays on that image; if not, it goes to the set's image nearest to it in time.
 
 The address bar carries the store, the set and the image (`#700c5b/<set>/<image>`), so a reload
 comes back to the same place and a view can be sent to someone.
 
 ## pand's config and prompts
 
-"pand config & prompts", at the bottom of the left rail, opens pand's own files as plain text:
+The Config module opens pand's own files as plain text:
 `~/.config/pan/config.yml` (the stores, the port, and every model pass: which model, its endpoint,
 its prompt, and the settings sent with each request) and the caption prompts in
 `~/.config/pan/prompts/`. Plain text on purpose: the comments in config.yml carry the reasons

@@ -159,6 +159,13 @@ impl Index {
     pub fn set_position(&self, set: &str) -> Option<usize> {
         self.sets.iter().position(|s| s.id == set)
     }
+
+    /// The sets an image belongs to, newest set first. Members are kept in
+    /// time order, which is position order, so each set is a binary search.
+    pub fn sets_of(&self, id: &str) -> Vec<&SetInfo> {
+        let Some(&p) = self.pos.get(id) else { return Vec::new() };
+        self.sets.iter().zip(&self.members).filter(|(_, m)| m.binary_search(&p).is_ok()).map(|(s, _)| s).collect()
+    }
 }
 
 #[cfg(test)]
@@ -205,5 +212,9 @@ mod tests {
         assert_eq!(ix.members[1], [0, 2]);
         assert_eq!(ix.members[0], [1]);
         assert_eq!(ix.sets[0].count, 1);
+        let ids = |v: Vec<&SetInfo>| v.iter().map(|s| s.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(ix.sets_of("c")), ["one"]);
+        assert_eq!(ids(ix.sets_of("b")), ["two"]);
+        assert!(ix.sets_of("ghost").is_empty());
     }
 }

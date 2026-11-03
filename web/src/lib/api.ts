@@ -34,7 +34,7 @@ export interface IndexState {
   sets?: SetInfo[]
 }
 
-/** Columns, in time order. Index i is one image across all four. */
+/** Columns, in time order, oldest first as pand sends them (the page turns them round). Index i is one image across all four. */
 export interface Images {
   store: string
   set: string | null
@@ -77,6 +77,9 @@ export const getIndex = (store: string) => json<IndexState>(`/api/stores/${store
 export const getImages = (store: string, set: string | null) =>
   json<Images>(`/api/stores/${store}/images${set ? `?set=${encodeURIComponent(set)}` : ''}`)
 export const getFacts = (id: string) => json<Facts>(`/api/facts/${id}`)
+/** The sets of the store that hold this image, newest set first. */
+export const getSetsOf = (store: string, id: string) =>
+  json<{ id: string; sets: SetInfo[] }>(`/api/stores/${store}/sets-of/${id}`)
 export const rebuild = (store: string) => json<{ ok: boolean }>(`/api/stores/${store}/rebuild`, { method: 'POST' })
 
 export function mark(store: string, ids: string[], m: { rating?: number; flag?: number }) {

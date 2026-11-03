@@ -3,6 +3,7 @@
   // One store at a time; a set is a slice of it, newest set first.
   import type { Store, IndexState, Health } from './api'
   import { count, day } from './format'
+  import Section from './Section.svelte'
 
   interface Props {
     stores: Store[]
@@ -12,10 +13,8 @@
     health: Health | null
     onstore: (s: Store) => void
     onset: (set: string | null) => void
-    configOpen: boolean
-    onconfig: () => void
   }
-  let { stores, current, index, set, health, onstore, onset, configOpen, onconfig }: Props = $props()
+  let { stores, current, index, set, health, onstore, onset }: Props = $props()
 
   let filter = $state('')
   const sets = $derived.by(() => {
@@ -34,9 +33,8 @@
 </script>
 
 <nav>
-  <section class="stores">
-    <h2 class="label">stores</h2>
-    <ul>
+  <Section key="stores" title="stores" aside={count(stores.length)}>
+    <ul class="stores">
       {#each stores as s (s.id)}
         <li>
           <button class:on={current?.id === s.id} disabled={!s.images} onclick={() => onstore(s)}>
@@ -46,21 +44,17 @@
         </li>
       {/each}
     </ul>
-  </section>
+  </Section>
 
   {#if current}
-    <section class="sets">
-      <h2 class="label">
-        sets
-        {#if index?.sets}<span class="n">{count(index.sets.length)}</span>{/if}
-      </h2>
+    <Section key="sets" title="sets" aside={index?.sets ? count(index.sets.length) : null} grow>
       {#if index?.ready}
         <input type="search" placeholder="filter sets" bind:value={filter} />
         <ul class="setlist">
           {#if !filter}
             <li>
               <button class:on={set === null} onclick={() => onset(null)}>
-                <span class="name">everything, in time order</span>
+                <span class="name">everything, newest first</span>
                 <span class="sub">{count(index.count)} · {day(index.first)} → {day(index.last)}</span>
               </button>
             </li>
@@ -83,11 +77,10 @@
       {:else}
         <p class="empty">reading {current.name}'s store from pand…</p>
       {/if}
-    </section>
+    </Section>
   {/if}
 
   <footer>
-    <button class="cfg" class:on={configOpen} onclick={onconfig}>{configOpen ? '← back to images' : 'pand config & prompts'}</button>
     {#if health?.pand}
       pand {health.pand.version} · {health.pand_url.replace('http://', '')}
     {:else if health}
@@ -102,18 +95,9 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
+    height: 100%;
   }
-  .label {
-    font-family: var(--mono);
-    font-size: 0.72rem;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--ink-soft);
-    margin: 0.8rem 0.9rem 0.35rem;
-    display: flex;
-    justify-content: space-between;
-  }
-  ul { list-style: none; margin: 0; padding: 0; }
+  ul { list-style: none; margin: 0 -0.9rem; padding: 0; }
   li button {
     display: flex;
     flex-direction: column;
@@ -131,20 +115,16 @@
   .name { font-family: var(--display); font-size: 0.95rem; }
   .setlist .name { font-family: var(--mono); font-size: 0.74rem; overflow-wrap: anywhere; }
   .n, .sub { font-size: 0.7rem; color: var(--ink-faint); }
-  .sets { display: flex; flex-direction: column; min-height: 0; flex: 1; border-top: 1px solid var(--rule); margin-top: 0.4rem; }
-  .setlist { overflow-y: auto; flex: 1; }
+  .setlist { overflow-y: auto; flex: 1; min-height: 0; }
   input {
-    margin: 0 0.9rem 0.4rem;
+    margin: 0 0 0.4rem;
     font: inherit;
     font-size: 0.8rem;
     padding: 0.2rem 0.4rem;
     border: 1px solid var(--rule-strong);
   }
   .more { font-size: 0.75rem; color: var(--ink-soft); text-decoration: underline; }
-  .empty { color: var(--ink-faint); font-size: 0.8rem; padding: 0 0.9rem; }
-  .warn { color: var(--warn); font-size: 0.8rem; padding: 0 0.9rem; }
-  footer { font-size: 0.7rem; color: var(--ink-faint); padding: 0.5rem 0.9rem; border-top: 1px solid var(--rule); }
-  footer .warn { padding: 0; }
-  .cfg { display: block; width: 100%; margin-bottom: 0.45rem; font-size: 0.76rem; text-align: left; }
-  .cfg.on { background: var(--ink); color: var(--paper); }
+  .empty { color: var(--ink-faint); font-size: 0.8rem; margin: 0; }
+  .warn { color: var(--warn); font-size: 0.8rem; margin: 0; }
+  footer { margin-top: auto; font-size: 0.7rem; color: var(--ink-faint); padding: 0.5rem 0.9rem; border-top: 1px solid var(--rule); }
 </style>

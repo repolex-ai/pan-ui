@@ -5,6 +5,8 @@
   import Loupe from './lib/Loupe.svelte'
   import Inspector from './lib/Inspector.svelte'
   import Config from './lib/Config.svelte'
+  import Filmstrip from './lib/Filmstrip.svelte'
+  import Lab from './lib/Lab.svelte'
   import { getStores, getIndex, getImages, getHealth, mark } from './lib/api'
   import type { Store, IndexState, Images, Health } from './lib/api'
   import { count } from './lib/format'
@@ -20,7 +22,54 @@
   let images = $state.raw<Images | null>(null)
   let imagesError = $state<string | null>(null)
   let cursor = $state(0)
-  let mode = $state<'grid' | 'loupe' | 'config'>('grid')
+  let mode = $state<'grid' | 'loupe'>('grid')
+  // Modules, Lightroom's way: each takes the whole screen below the top bar.
+  // Library is the viewer; Lab holds development views that do not fit its
+  // layout; Config edits pand's own files. The module is in the address
+  // (?m=lab), so a lab view can be reloaded or sent as a link.
+  type Module = 'library' | 'lab' | 'config'
+  const MODULES: { id: Module; title: string }[] = [
+    { id: 'library', title: 'Library' },
+    { id: 'lab', title: 'Lab' },
+    { id: 'config', title: 'Config' },
+  ]
+  let module = $state<Module>(readModule())
+  function readModule(): Module {
+    const m = new URLSearchParams(location.search).get('m')
+    return m === 'lab' || m === 'config' ? m : 'library'
+  }
+  function setModule(m: Module) {
+    module = m
+    const q = new URLSearchParams(location.search)
+    if (m === 'library') q.delete('m')
+    else q.set('m', m)
+    const qs = q.toString()
+    history.replaceState(null, '', `${location.pathname}${qs ? `?${qs}` : ''}${location.hash}`)
+  }
+
+  // Panels that can be put away: the two sides and the filmstrip. Each is
+  // remembered across reloads.
+  type Panels = { left: boolean; right: boolean; film: boolean }
+  let panels = $state<Panels>(readPanels())
+  function readPanels(): Panels {
+    try {
+      return { left: true, right: true, film: true, ...JSON.parse(localStorage.getItem('pan-ui.panels') ?? '{}') }
+    } catch {
+      return { left: true, right: true, film: true }
+    }
+  }
+  function setPanels(p: Partial<Panels>) {
+    panels = { ...panels, ...p }
+    try {
+      localStorage.setItem('pan-ui.panels', JSON.stringify(panels))
+    } catch {}
+  }
+  /** Tab: both sides away, or both back. Shift+Tab: the same, filmstrip too. */
+  function togglePanels(all: boolean) {
+    const anyOpen = panels.left || panels.right || (all && panels.film)
+    setPanels(all ? { left: !anyOpen, right: !anyOpen, film: !anyOpen } : { left: !anyOpen, right: !anyOpen })
+  }
+  const filmShown = $derived(panels.film && mode === 'loupe')
   let dir = $state(1)
   let cols = $state(1)
   let size = $state(readSize())
@@ -90,33 +139,53 @@
   }
 
   let loadSeq = 0
-  async function loadImages(keepId: string | null = null) {
+  /** Load the open set's columns and put the cursor on keepId; if the set
+   *  does not hold it, on the image nearest keepT in time. */
+  async function loadImages(keepId: string | null = null, keepT: number | null = null) {
     if (!current) return
     const store = current.id
     const seq = ++loadSeq
     try {
-      const im = await getImages(store, set)
+      const im = newestFirst(await getImages(store, set))
       if (seq !== loadSeq) return
       images = im
       imagesError = null
       const k = keepId ? im.ids.indexOf(keepId) : -1
-      cursor = k >= 0 ? k : 0
+      cursor = k >= 0 ? k : keepT != null ? nearest(im.t, keepT) : 0
       writeHash()
     } catch (e) {
       if (seq === loadSeq) imagesError = (e as Error).message
     }
   }
 
-  function toggleConfig() {
-    mode = mode === 'config' ? 'grid' : 'config'
+  /** pand sends a set oldest first; the newest images are what you come to
+   *  see, so they go at the top. Every column is turned round together. */
+  function newestFirst(im: Images): Images {
+    return { ...im, ids: im.ids.reverse(), t: im.t.reverse(), rating: im.rating.reverse(), flag: im.flag.reverse() }
   }
 
+  /** Index of the time in a newest-first column closest to t. */
+  function nearest(ts: number[], t: number): number {
+    let lo = 0,
+      hi = ts.length - 1
+    if (hi < 0) return 0
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (ts[mid] > t) lo = mid + 1
+      else hi = mid
+    }
+    return lo > 0 && ts[lo - 1] - t <= t - ts[lo] ? lo - 1 : lo
+  }
+
+  /** Open a set and stay with the image under the cursor: on it, if the set
+   *  holds it (as "everything" always does), or on the set's image nearest
+   *  to it in time. The view, grid or full size, stays as it was. */
   function openSet(s: string | null) {
+    const keepId = images?.ids[cursor] ?? null
+    const keepT = images?.t[cursor] ?? null
     set = s
-    cursor = 0
-    mode = 'grid'
     images = null
-    loadImages()
+    loadImages(keepId, keepT)
   }
 
   function move(to: number) {
@@ -156,10 +225,15 @@
   function onkey(e: KeyboardEvent) {
     const t = e.target as HTMLElement
     if (t?.tagName === 'INPUT' || t?.tagName === 'TEXTAREA') return
-    // The config editor has its own keys; nothing here may mark an image
+    // Config and Lab have their own keys; nothing here may mark an image
     // that is not even on screen.
-    if (mode === 'config') return
+    if (module !== 'library') return
     if (e.metaKey || e.ctrlKey || e.altKey) return
+    if (e.key === 'Tab') {
+      e.preventDefault()
+      togglePanels(e.shiftKey)
+      return
+    }
     const adv = e.shiftKey
     const digit = e.code.match(/^(?:Digit|Numpad)([0-5])$/)
     let handled = true
@@ -229,14 +303,22 @@
 
 <svelte:window onkeydown={onkey} />
 
-<div class="page">
+<div
+  class="page"
+  class:no-left={!panels.left || module !== 'library'}
+  class:no-right={!panels.right || module !== 'library'}
+  class:no-film={!filmShown || module !== 'library'}
+  class:film-edge={mode === 'loupe' && module === 'library'}
+>
   <header class="top">
     <span class="brand">pan</span>
     {#if current}
       <span class="storename">{current.name}</span>
-      <span class="setname" title={set ?? ''}>{set ?? 'everything, in time order'}</span>
+      {#if module === 'library'}
+        <span class="setname" title={set ?? ''}>{set ?? 'everything, newest first'}</span>
+      {/if}
     {/if}
-    {#if images}
+    {#if images && module === 'library'}
       <span class="meta">
         {count(images.ids.length ? cursor + 1 : 0)} / {count(images.ids.length)}
         {#if tally}
@@ -255,40 +337,84 @@
         saved
       {/if}
     </span>
+    <nav class="modules">
+      {#each MODULES as m, k (m.id)}
+        {#if k}<span class="sep">|</span>{/if}
+        <button class:on={module === m.id} onclick={() => setModule(m.id)}>{m.title}</button>
+      {/each}
+    </nav>
   </header>
 
-  <LeftRail {stores} {current} {index} {set} {health} onstore={(s) => openStore(s)} onset={openSet} configOpen={mode === 'config'} onconfig={toggleConfig} />
+  {#if module === 'library'}
+    <button class="edge edge-left" onclick={() => setPanels({ left: !panels.left })} title="{panels.left ? 'hide' : 'show'} the left panel (Tab: both sides)">
+      {panels.left ? '◂' : '▸'}
+    </button>
+    <div class="left">
+      <LeftRail {stores} {current} {index} {set} {health} onstore={(s) => openStore(s)} onset={openSet} />
+    </div>
 
-  <main>
-    {#if mode === 'config'}
-      <Config />
-    {:else if storesError}
-      <p class="state warn">Could not list stores: {storesError}</p>
-    {:else if imagesError}
-      <p class="state warn">{imagesError}</p>
-    {:else if images && images.ids.length === 0}
-      <p class="state">no images</p>
-    {:else if images}
-      {#if mode === 'grid'}
-        <Grid {images} {cursor} {size} bind:cols onpick={move} onopen={(i) => (move(i), (mode = 'loupe'))} />
-      {:else}
-        <Loupe {images} {cursor} {dir} onclose={() => (mode = 'grid')} />
+    <main>
+      {#if storesError}
+        <p class="state warn">Could not list stores: {storesError}</p>
+      {:else if imagesError}
+        <p class="state warn">{imagesError}</p>
+      {:else if images && images.ids.length === 0}
+        <p class="state">no images</p>
+      {:else if images}
+        {#if mode === 'grid'}
+          <Grid {images} {cursor} {size} bind:cols onpick={move} onopen={(i) => (move(i), (mode = 'loupe'))} />
+        {:else}
+          <Loupe {images} {cursor} {dir} onclose={() => (mode = 'grid')} />
+        {/if}
+      {:else if current}
+        <p class="state">reading {current.name}…</p>
       {/if}
-    {:else if current}
-      <p class="state">reading {current.name}…</p>
-    {/if}
-  </main>
+    </main>
 
-  <Inspector {images} {cursor} />
+    <div class="right">
+      <Inspector store={current?.id ?? null} {images} {cursor} {set} onset={openSet} />
+    </div>
+    <button class="edge edge-right" onclick={() => setPanels({ right: !panels.right })} title="{panels.right ? 'hide' : 'show'} the right panel (Tab: both sides)">
+      {panels.right ? '▸' : '◂'}
+    </button>
+
+    {#if mode === 'loupe'}
+      <div class="film">
+        {#if filmShown && images}<Filmstrip {images} {cursor} onpick={move} />{/if}
+      </div>
+      <button class="edge edge-bottom" onclick={() => setPanels({ film: !panels.film })} title="{panels.film ? 'hide' : 'show'} the filmstrip (Shift+Tab: all panels)">
+        {panels.film ? '▾' : '▴'}
+      </button>
+    {/if}
+  {:else}
+    <section class="whole">
+      {#if module === 'config'}
+        <Config />
+      {:else}
+        <Lab store={current} image={images?.ids[cursor] ?? null} />
+      {/if}
+    </section>
+  {/if}
 </div>
 
 <style>
+  /* Five columns: an edge strip, the left panel, the stage, the right panel,
+     an edge strip. A panel put away is a column of width 0; it stays in the
+     page, so a typed filter or a scroll position survives hiding it. */
   .page {
+    --left: 16rem;
+    --right: 28rem;
+    --film: 112px;
+    --edge: 12px;
     display: grid;
-    grid-template-columns: 16rem 1fr 22rem;
-    grid-template-rows: auto 1fr;
+    grid-template-columns: var(--edge) var(--left) 1fr var(--right) var(--edge);
+    grid-template-rows: auto 1fr var(--film) 0;
     height: 100vh;
   }
+  .page.no-left { --left: 0px; }
+  .page.no-right { --right: 0px; }
+  .page.no-film { --film: 0px; }
+  .page.film-edge { grid-template-rows: auto 1fr var(--film) var(--edge); }
   .top {
     grid-column: 1 / -1;
     display: flex;
@@ -303,7 +429,40 @@
   .setname { font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; }
   .meta { font-size: 0.75rem; color: var(--ink-soft); }
   .save { margin-left: auto; font-size: 0.75rem; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; }
-  main { position: relative; min-width: 0; min-height: 0; background: var(--stage); }
+  .modules { display: flex; align-items: baseline; gap: 0.35rem; }
+  .modules button {
+    border: 0;
+    background: none;
+    padding: 0 0.15rem;
+    font-family: var(--display);
+    font-size: 1rem;
+    color: var(--ink-faint);
+  }
+  .modules button:hover { background: none; color: var(--ink); }
+  .modules button.on { color: var(--ink); text-decoration: underline; text-underline-offset: 0.3em; }
+  .sep { color: var(--rule-strong); opacity: 0.3; }
+
+  .left { grid-column: 2; grid-row: 2 / 4; min-height: 0; overflow: hidden; }
+  main { grid-column: 3; grid-row: 2; position: relative; min-width: 0; min-height: 0; background: var(--stage); }
+  .right { grid-column: 4; grid-row: 2 / 4; min-height: 0; overflow: hidden; }
+  .film { grid-column: 3; grid-row: 3; position: relative; min-width: 0; overflow: hidden; }
+  .whole { grid-column: 1 / -1; grid-row: 2 / -1; position: relative; min-height: 0; }
+
+  /* The edge strips, Lightroom's: a thin bar along the screen's edge with a
+     triangle that puts the panel away or brings it back. */
+  .edge {
+    border: 0;
+    padding: 0;
+    background: var(--paper-tint);
+    color: var(--ink-faint);
+    font-size: 0.6rem;
+    line-height: 1;
+  }
+  .edge:hover:not(:disabled) { background: var(--rule); color: var(--ink); }
+  .edge-left { grid-column: 1; grid-row: 2 / -1; border-right: 1px solid var(--rule); }
+  .edge-right { grid-column: 5; grid-row: 2 / -1; border-left: 1px solid var(--rule); }
+  .edge-bottom { grid-column: 2 / 5; grid-row: 4; border-top: 1px solid var(--rule); }
+
   .state { padding: 2rem; color: var(--stage-soft); }
   .warn { color: var(--warn); }
   .state.warn { white-space: pre-wrap; }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The grid: every image of the set as a thumbnail, in time order.
+  // The grid: every image of the set as a thumbnail, newest first.
   //
   // A set can be 200,000 images, so only the rows on screen (and a few either
   // side) exist as elements; the rest is one tall empty box that gives the
