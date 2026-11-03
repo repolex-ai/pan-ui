@@ -87,6 +87,50 @@ always does), it stays on that image; if not, it goes to the set's image nearest
 The address bar carries the store, the set and the image (`#700c5b/<set>/<image>`), so a reload
 comes back to the same place and a view can be sent to someone.
 
+## The Lab
+
+The Lab's views read data that `tools/lab_build.py` works out once per store from what Pan
+already wrote beside the images (the embeddings and the body poses). It never writes to the
+store. Build it, then gather the captions for the word search:
+
+```bash
+uv venv tools/.venv && uv pip install --python tools/.venv/bin/python numpy umap-learn scikit-learn
+tools/.venv/bin/python tools/lab_build.py <store-id>    # about two minutes for 65,000 images
+tools/.venv/bin/python tools/lab_words.py <store-id>    # about two minutes for 200,000 images
+```
+
+Both write to `~/.pan-ui/lab/<store>/`, which can be deleted at any time. The data is a
+snapshot: Pan keeps embedding new images, and the Lab bar says when the snapshot was taken and
+how many newer embeddings `pand` holds. Run the two commands again to catch up.
+
+The embeddings are kept in memory reduced to 256 dimensions (by PCA), so "what looks like this?"
+is answered in about 50 ms without asking `pand`. Scores in the Lab are in that reduced space,
+close to but not the same as `pand`'s own search.
+
+- **Atlas.** Every image with an embedding as a dot, placed so that look-alikes sit together
+  (UMAP), coloured by place in time order. Zoom in and the dots become the pictures. Play runs the
+  store's history. Click a dot for its nearest images, and the nearest from outside its own sets.
+- **Joystick.** One image and a step in each of eight directions: the two ways the images around
+  it differ most, worked out afresh at each step. `Q W E / A D / Z X C` or the arrows to steer,
+  `Space` to jump anywhere, `Backspace` to go back.
+- **Words & Looks.** Caption search, and beside it the images that look like the matches but
+  whose captions never use the words: what a word search alone cannot find.
+- **Mixer.** More like these, less like those, weighted. Scope keeps to the first image's own
+  sets, leaves them, or shows both side by side; images cluster hard by the set they were made in,
+  and leaving it shows what an image resembles anywhere else.
+- **Echoes.** Pairs that look alike but were made at least three weeks apart, then and now.
+- **Pose.** Drag a stick figure; the bodies that stand that way come up as you drag. Joints you
+  move count most.
+- **Sets.** Every set as a circle where its images sit on the Atlas, joined to the sets it looks
+  most like.
+- **Diary.** For a soul's store: the soul's memory notes from ravel (`raveld` on port 7881, same
+  id as the store), each beside the images made while it was the latest note.
+- **Facets.** Every property the images carry, its commonest values as bars, and the images
+  behind each value. Asks `pand` directly; needs no Lab data.
+- **Daydream.** The joystick with nobody holding it: a slow drift through the store, full size.
+
+Double-click any image in the Lab to open it in the Library.
+
 ## pand's config and prompts
 
 The Config module opens pand's own files as plain text:
@@ -133,4 +177,5 @@ pan-ui does not restart it.
 `pan-ui` writes three properties on images, through `pand`'s `/media/{id}/set` and `/unset`:
 `pan:rating`, `pan:isPicked` and `pan:isRejected`. No stars and no flag are removals, not zeros or
 falses. It reaches no other route that changes anything: not delivery, not deletion, not set
-membership.
+membership. The Lab only reads: from `pand`, from `raveld`, and from the files beside a store's
+images.
