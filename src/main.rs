@@ -77,6 +77,9 @@ struct AppState {
     /// A soul's finest memory notes from raveld, per store, with when they
     /// were fetched.
     notes: Mutex<HashMap<String, (std::time::Instant, Arc<Value>)>>,
+    /// The properties a store's images carry, with counts: a six-second
+    /// question on a big store, so asked once per index build.
+    props: Mutex<HashMap<String, (String, Arc<Value>)>>,
 }
 
 struct Words {
@@ -114,6 +117,7 @@ async fn main() {
         words: Mutex::new(HashMap::new()),
         set_graphs: Mutex::new(HashMap::new()),
         notes: Mutex::new(HashMap::new()),
+        props: Mutex::new(HashMap::new()),
     });
     tokio::spawn(Arc::clone(&queue).drain(pand));
     tokio::spawn(watch(Arc::clone(&state)));
@@ -138,6 +142,8 @@ async fn main() {
         .route("/api/lab/{store}/hybrid", post(api_lab_hybrid))
         .route("/api/lab/{store}/sets", get(api_lab_sets))
         .route("/api/lab/{store}/notes", get(api_lab_notes))
+        .route("/api/lab/{store}/props", get(api_lab_props))
+        .route("/api/lab/{store}/facet", get(api_lab_facet).post(api_lab_facet_images))
         .route("/api/config", get(api_config))
         .route("/api/config/{*name}", axum::routing::put(api_config_save))
         .route("/{*asset}", get(static_asset))
@@ -978,6 +984,114 @@ async fn api_lab_sets(State(s): S, AxPath(store): AxPath<String>) -> Response {
     }
 }
 
+/// An IRI fit to put between angle brackets in a query, or None.
+fn safe_iri(p: &str) -> Option<&str> {
+    let ok = p.starts_with("http") && !p.chars().any(|c| matches!(c, '<' | '>' | '"' | '{' | '}' | '|' | '\\' | '^' | '`') || c.is_whitespace());
+    ok.then_some(p)
+}
+
+/// A SPARQL term from a results binding: an IRI, or a literal with its
+/// datatype or language, escaped.
+fn term(b: &Value) -> Option<String> {
+    let v = b["value"].as_str()?;
+    match b["type"].as_str()? {
+        "uri" => safe_iri(v).map(|x| format!("<{x}>")),
+        "literal" | "typed-literal" => {
+            let esc = v.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r");
+            Some(match (b["datatype"].as_str(), b["xml:lang"].as_str()) {
+                (_, Some(l)) => format!("\"{esc}\"@{l}"),
+                (Some(d), _) => format!("\"{esc}\"^^<{}>", safe_iri(d)?),
+                _ => format!("\"{esc}\""),
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Every property the store's images carry, with how many statements use
+/// it, most used first.
+async fn api_lab_props(State(s): S, AxPath(store): AxPath<String>) -> Response {
+    if let Err(r) = check(&store) {
+        return r;
+    }
+    ensure(&s, &store);
+    let built = s.slots.lock().unwrap().get(&store).and_then(|x| x.index.clone()).map(|ix| ix.read().unwrap().built.clone());
+    let built = built.unwrap_or_default();
+    if let Some((b, v)) = s.props.lock().unwrap().get(&store) {
+        if *b == built {
+            return Json(v.as_ref().clone()).into_response();
+        }
+    }
+    let q = "SELECT ?p (COUNT(*) AS ?n) WHERE { ?m a <https://repolex.ai/ontology/pan/Image> ; ?p ?v } GROUP BY ?p ORDER BY DESC(?n)";
+    match s.pand.select(&store, &["p", "n"], q).await {
+        Ok(rows) => {
+            let props: Vec<Value> = rows
+                .into_iter()
+                .filter_map(|r| Some(json!({"p": r[0].clone()?, "n": r[1].as_deref()?.parse::<u64>().ok()?})))
+                .collect();
+            let v = Arc::new(json!({ "props": props }));
+            s.props.lock().unwrap().insert(store, (built, Arc::clone(&v)));
+            Json(v.as_ref().clone()).into_response()
+        }
+        Err(e) => err(StatusCode::BAD_GATEWAY, e),
+    }
+}
+
+#[derive(Deserialize)]
+struct FacetQuery {
+    p: String,
+}
+
+/// The commonest values of one property, with counts.
+async fn api_lab_facet(State(s): S, AxPath(store): AxPath<String>, Query(q): Query<FacetQuery>) -> Response {
+    if let Err(r) = check(&store) {
+        return r;
+    }
+    let Some(p) = safe_iri(&q.p) else { return err(StatusCode::BAD_REQUEST, "not a property IRI") };
+    let query = format!(
+        "SELECT ?v (COUNT(*) AS ?n) WHERE {{ ?m a <https://repolex.ai/ontology/pan/Image> ; <{p}> ?v }} GROUP BY ?v ORDER BY DESC(?n) LIMIT 80"
+    );
+    match s.pand.select_terms(&store, &query).await {
+        Ok(rows) => Json(json!({ "p": p, "values": rows })).into_response(),
+        Err(e) => err(StatusCode::BAD_GATEWAY, e),
+    }
+}
+
+#[derive(Deserialize)]
+struct FacetImagesBody {
+    p: String,
+    /// A value exactly as /facet returned it.
+    v: Value,
+}
+
+/// The images with that value for that property, newest first.
+async fn api_lab_facet_images(State(s): S, AxPath(store): AxPath<String>, Json(b): Json<FacetImagesBody>) -> Response {
+    if let Err(r) = check(&store) {
+        return r;
+    }
+    let (Some(p), Some(v)) = (safe_iri(&b.p), term(&b.v)) else {
+        return err(StatusCode::BAD_REQUEST, "not a property and value");
+    };
+    let query = format!("SELECT ?m WHERE {{ ?m a <https://repolex.ai/ontology/pan/Image> ; <{p}> {v} }}");
+    let rows = match s.pand.select(&store, &["m"], &query).await {
+        Ok(r) => r,
+        Err(e) => return err(StatusCode::BAD_GATEWAY, e),
+    };
+    let ids: Vec<String> =
+        rows.into_iter().filter_map(|r| r[0].as_deref().map(|m| m.trim_end_matches('>').rsplit('/').next().unwrap_or(m).to_string())).collect();
+    let total = ids.len();
+    let ix = s.slots.lock().unwrap().get(&store).and_then(|x| x.index.clone());
+    let mut dated: Vec<(i64, String)> = match ix {
+        Some(ix) => {
+            let ix = ix.read().unwrap();
+            ids.into_iter().map(|id| (ix.pos.get(&id).map(|&q| ix.t[q as usize]).unwrap_or(0), id)).collect()
+        }
+        None => ids.into_iter().map(|id| (0, id)).collect(),
+    };
+    dated.sort_by(|a, b| b.0.cmp(&a.0));
+    Json(json!({ "total": total, "ids": dated.into_iter().take(400).map(|x| x.1).collect::<Vec<_>>() })).into_response()
+}
+
 /// Unix seconds from an RFC 3339 time, as raveld writes them.
 fn rfc3339_secs(x: &str) -> Option<i64> {
     chrono::DateTime::parse_from_rfc3339(x).ok().map(|d| d.timestamp())
@@ -1131,6 +1245,19 @@ mod tests {
         if let Ok(home) = std::env::var("HOME") {
             assert_eq!(store_name(&format!("{home}/.pan")), "~/.pan");
         }
+    }
+
+    #[test]
+    fn terms_go_back_exactly() {
+        use serde_json::json;
+        assert_eq!(super::term(&json!({"type": "literal", "value": "serene"})).as_deref(), Some("\"serene\""));
+        assert_eq!(
+            super::term(&json!({"type": "literal", "value": "4", "datatype": "http://www.w3.org/2001/XMLSchema#integer"})).as_deref(),
+            Some("\"4\"^^<http://www.w3.org/2001/XMLSchema#integer>")
+        );
+        assert_eq!(super::term(&json!({"type": "literal", "value": "a \"q\""})).as_deref(), Some("\"a \\\"q\\\"\""));
+        assert_eq!(super::term(&json!({"type": "uri", "value": "https://x/y"})).as_deref(), Some("<https://x/y>"));
+        assert_eq!(super::term(&json!({"type": "uri", "value": "https://x/> } DROP"})), None);
     }
 
     #[test]

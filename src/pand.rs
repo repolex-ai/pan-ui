@@ -70,6 +70,29 @@ impl Pand {
         Ok((b.to_vec(), ct))
     }
 
+    /// A SELECT, with each binding whole (type, value, datatype): for when a
+    /// value has to be sent back to pand exactly as it came.
+    pub async fn select_terms(&self, store: &str, query: &str) -> Result<Vec<Value>, String> {
+        let r = self
+            .http
+            .post(format!("{}/stores/{store}/sparql", self.base))
+            .header("Content-Type", "application/sparql-query")
+            .header("Accept", "application/sparql-results+json")
+            .body(query.to_string())
+            .send()
+            .await
+            .map_err(|e| self.down(e))?;
+        let status = r.status();
+        if !status.is_success() {
+            return Err(format!("pand sparql: {status}: {}", r.text().await.unwrap_or_default()));
+        }
+        let v: Value = r.json().await.map_err(|e| format!("pand sparql: {e}"))?;
+        v.pointer("/results/bindings")
+            .and_then(Value::as_array)
+            .cloned()
+            .ok_or_else(|| "pand sparql: reply has no results.bindings".into())
+    }
+
     /// A SELECT against one store. A reply with no `results.bindings` is an
     /// error, never an empty answer: "pand could not run it" and "nothing
     /// matched" must not look the same.

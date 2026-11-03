@@ -18,6 +18,7 @@ import Echoes from './Echoes.svelte'
 import Pose from './Pose.svelte'
 import Sets from './Sets.svelte'
 import Diary from './Diary.svelte'
+import Facets from './Facets.svelte'
 
 export interface LabProps {
   store: Store | null
@@ -84,5 +85,11 @@ export const labs: LabView[] = [
     title: 'Diary',
     about: "The soul's memory notes from ravel, each beside the images made while it was the latest",
     view: Diary,
+  },
+  {
+    id: 'facets',
+    title: 'Facets',
+    about: 'Every property the images carry, its commonest values as bars, and the images behind each',
+    view: Facets,
   },
 ]
