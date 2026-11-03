@@ -8,7 +8,7 @@
     note?: string | null
     size?: number
     on?: boolean
-    onclick?: (id: string) => void
+    onclick?: (id: string, e: MouseEvent) => void
     onopen?: (id: string) => void
   }
   let { id, note = null, size = 140, on = false, onclick, onopen }: Props = $props()
@@ -18,7 +18,7 @@
   class="pic"
   class:on
   style="width:{size}px"
-  onclick={() => onclick?.(id)}
+  onclick={(e) => onclick?.(id, e)}
   ondblclick={() => onopen?.(id)}
   title="{id} · click to use, double-click to open in the Library"
 >

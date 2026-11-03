@@ -12,6 +12,8 @@ import type { Component } from 'svelte'
 import type { Store } from '../api'
 import Joystick from './Joystick.svelte'
 import Atlas from './Atlas.svelte'
+import Words from './Words.svelte'
+import Mixer from './Mixer.svelte'
 
 export interface LabProps {
   store: Store | null
@@ -40,5 +42,17 @@ export const labs: LabView[] = [
     title: 'Joystick',
     about: 'Steer through the store by look: eight directions from any image, along the ways its neighbours differ most',
     view: Joystick,
+  },
+  {
+    id: 'words',
+    title: 'Words & Looks',
+    about: 'Caption search, and beside it the images that look like the matches but whose captions never say it',
+    view: Words,
+  },
+  {
+    id: 'mixer',
+    title: 'Mixer',
+    about: 'A recipe of images: more like these, less like those, inside or outside their own sets',
+    view: Mixer,
   },
 ]
