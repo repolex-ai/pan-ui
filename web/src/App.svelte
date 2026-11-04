@@ -9,7 +9,7 @@
   import Lab from './lib/Lab.svelte'
   import FilterBar from './lib/FilterBar.svelte'
   import { apply as applyFilter, readFilter, writeFilter, type Filter } from './lib/filter'
-  import { getStores, getIndex, getImages, getHealth, mark } from './lib/api'
+  import { getStores, getIndex, getImages, getLike, getHealth, mark } from './lib/api'
   import type { Store, IndexState, Images, Health } from './lib/api'
   import { count } from './lib/format'
 
@@ -19,6 +19,9 @@
   let current = $state<Store | null>(null)
   let index = $state<IndexState | null>(null)
   let set = $state<string | null>(null)
+  // "More like this": while it is set, the Library shows that image and the
+  // images most like it instead of the set. The set stays, to go back to.
+  let like = $state<string | null>(null)
   // Raw, not deep: 200,000-long columns would cost a proxy per element. A
   // mark replaces the column it changes, which is what tells the page.
   // `loaded` is the whole set; `images` is what the filter lets through,
@@ -117,6 +120,7 @@
     loaded = null
     imagesError = null
     set = wantSet
+    like = null
     cursor = 0
     mode = 'grid'
     writeHash()
@@ -152,7 +156,7 @@
     const store = current.id
     const seq = ++loadSeq
     try {
-      const im = newestFirst(await getImages(store, set))
+      const im = like ? await getLike(store, like) : newestFirst(await getImages(store, set))
       if (seq !== loadSeq) return
       loaded = im
       imagesError = null
@@ -206,8 +210,46 @@
     const keepId = images?.ids[cursor] ?? null
     const keepT = images?.t[cursor] ?? null
     set = s
+    like = null
     loaded = null
     loadImages(keepId, keepT)
+  }
+
+  /** The image under the cursor and the images that look most like it,
+   *  most alike first. From inside such a list it starts again from the new
+   *  image, so S walks from one look to the next. */
+  async function moreLike() {
+    const id = images?.ids[cursor]
+    if (!id || !current) return
+    const store = current.id
+    const seq = ++loadSeq
+    try {
+      const im = await getLike(store, id)
+      if (seq !== loadSeq || current?.id !== store) return
+      like = id
+      loaded = im
+      imagesError = null
+      place(id, null)
+    } catch (e) {
+      // Stay where you were; say why in the top bar for a moment.
+      if (seq === loadSeq) say((e as Error).message)
+    }
+  }
+
+  let notice = $state<string | null>(null)
+  let noticeTimer: ReturnType<typeof setTimeout> | undefined
+  function say(msg: string) {
+    notice = msg
+    clearTimeout(noticeTimer)
+    noticeTimer = setTimeout(() => (notice = null), 6000)
+  }
+
+  /** Back to the set, on the image that was under the cursor. */
+  function leaveLike() {
+    const keepId = images?.ids[cursor] ?? null
+    like = null
+    loaded = null
+    loadImages(keepId, null)
   }
 
   /** From the Lab: the image, full size, in "everything". If the filter
@@ -216,6 +258,7 @@
     setModule('library')
     mode = 'loupe'
     set = null
+    like = null
     loaded = null
     loadImages(id, null)
   }
@@ -293,6 +336,8 @@
     else if (e.key === 'ArrowDown') move(cursor + (mode === 'grid' ? cols : 1))
     else if (e.key === 'ArrowUp') move(cursor - (mode === 'grid' ? cols : 1))
     else if (e.code === 'KeyR' && !adv) jump()
+    else if (e.code === 'KeyS' && !adv) moreLike()
+    else if (e.key === 'Backspace' && like) leaveLike()
     else if (e.key === 'Home') move(0)
     else if (e.key === 'End') move(Infinity)
     else if (e.key === 'PageDown' && mode === 'grid') move(cursor + cols * 4)
@@ -364,7 +409,12 @@
     {#if current}
       <span class="storename">{current.name}</span>
       {#if module === 'library'}
-        <span class="setname" title={set ?? ''}>{set ?? 'everything, newest first'}</span>
+        {#if like}
+          <span class="setname">like {like}, most alike first</span>
+          <button class="leave" onclick={leaveLike} title="back to {set ?? 'everything'} (Backspace)">× back to {set ?? 'everything'}</button>
+        {:else}
+          <span class="setname" title={set ?? ''}>{set ?? 'everything, newest first'}</span>
+        {/if}
       {/if}
     {/if}
     {#if images && module === 'library'}
@@ -376,8 +426,10 @@
         {/if}
       </span>
     {/if}
-    <span class="save" class:warn={markError || queue?.last_error}>
-      {#if markError}
+    <span class="save" class:warn={notice || markError || queue?.last_error}>
+      {#if notice}
+        {notice}
+      {:else if markError}
         {markError}
       {:else if queue?.last_error}
         {queue.pending} waiting to save · {queue.last_error}
@@ -427,7 +479,7 @@
     </main>
 
     <div class="right">
-      <Inspector store={current?.id ?? null} {images} {cursor} {set} onset={openSet} />
+      <Inspector store={current?.id ?? null} {images} {cursor} {set} onset={openSet} {like} onlike={moreLike} />
     </div>
     <button class="edge edge-right" onclick={() => setPanels({ right: !panels.right })} title="{panels.right ? 'hide' : 'show'} the right panel (Tab: both sides)">
       {panels.right ? '▸' : '◂'}
@@ -483,6 +535,7 @@
   .brand, .storename { font-family: var(--display); font-size: 1.05rem; }
   .setname { font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; }
   .meta { font-size: 0.75rem; color: var(--ink-soft); }
+  .leave { font-size: 0.72rem; padding: 0 0.4rem; flex-shrink: 0; }
   .save { margin-left: auto; font-size: 0.75rem; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; }
   .modules { display: flex; align-items: baseline; gap: 0.35rem; }
   .modules button {

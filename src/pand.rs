@@ -1,7 +1,7 @@
 //! The one door to `pand`, Pan's daemon.
 //!
 //! pand holds every store on the machine and answers for each by its short
-//! id. pan-ui reads from it (store list, SPARQL, thumbnails, full images,
+//! id. pan-ui reads from it (store list, SPARQL, search, thumbnails, full images,
 //! facts) and writes exactly three properties back: `pan:rating`,
 //! `pan:isPicked` and `pan:isRejected`. Every other route pand has — deliver,
 //! delete, redo, rename-namespace, set membership — is out of reach because
@@ -122,6 +122,36 @@ impl Pand {
                     .collect()
             })
             .collect())
+    }
+
+    /// The k images that look most like this one, most alike first, by
+    /// pand's own vector index (`POST /search` with `like`). The image itself
+    /// is not among them. Errors keep pand's status, so "no embedding yet"
+    /// (404) can be told apart from pand being down.
+    pub async fn like(&self, store: &str, id: &str, k: usize) -> Result<Vec<(String, f32)>, (u16, String)> {
+        let r = self
+            .http
+            .post(format!("{}/search", self.base))
+            .json(&json!({ "store": store, "like": format!("<pan/Image/{id}>"), "k": k }))
+            .send()
+            .await
+            .map_err(|e| (502, self.down(e)))?;
+        let status = r.status();
+        if !status.is_success() {
+            return Err((status.as_u16(), r.text().await.unwrap_or_default()));
+        }
+        let v: Value = r.json().await.map_err(|e| (502, format!("pand /search: {e}")))?;
+        Ok(v["hits"]
+            .as_array()
+            .map(|hits| {
+                hits.iter()
+                    .filter_map(|h| {
+                        let id = h["id"].as_str()?.trim_start_matches("<pan/Image/").trim_end_matches('>');
+                        Some((id.to_string(), h["score"].as_f64()? as f32))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
     }
 
     pub async fn set(&self, id: &str, fields: Value) -> Result<(), String> {

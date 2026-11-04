@@ -61,6 +61,7 @@ export function apply(im: Images, f: Filter): View {
     t: src.map((i) => im.t[i]),
     rating: src.map((i) => im.rating[i]),
     flag: src.map((i) => im.flag[i]),
+    score: im.score && src.map((i) => im.score![i]),
     src,
   }
 }

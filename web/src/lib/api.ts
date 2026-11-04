@@ -44,6 +44,10 @@ export interface Images {
   rating: number[]
   /** 1 picked, 0 none, -1 rejected. */
   flag: number[]
+  /** "More like this": the image the list was asked for (first in it), and
+   *  each image's likeness to it, 1 for itself. Absent for a set. */
+  like?: string
+  score?: number[]
 }
 
 export interface QueueStatus {
@@ -76,6 +80,8 @@ export const getStores = () => json<Store[]>('/api/stores')
 export const getIndex = (store: string) => json<IndexState>(`/api/stores/${store}/index`)
 export const getImages = (store: string, set: string | null) =>
   json<Images>(`/api/stores/${store}/images${set ? `?set=${encodeURIComponent(set)}` : ''}`)
+/** The image and the images pand finds most like it, most alike first. */
+export const getLike = (store: string, id: string) => json<Images>(`/api/stores/${store}/like/${id}`)
 export const getFacts = (id: string) => json<Facts>(`/api/facts/${id}`)
 /** The sets of the store that hold this image, newest set first. */
 export const getSetsOf = (store: string, id: string) =>

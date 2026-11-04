@@ -131,6 +131,7 @@ async fn main() {
         .route("/api/stores/{store}/marks", post(api_marks))
         .route("/api/stores/{store}/rebuild", post(api_rebuild))
         .route("/api/stores/{store}/sets-of/{id}", get(api_sets_of))
+        .route("/api/stores/{store}/like/{id}", get(api_like))
         .route("/api/thumb/{id}", get(api_thumb))
         .route("/api/media/{id}", get(api_media))
         .route("/api/facts/{id}", get(api_facts))
@@ -461,6 +462,52 @@ async fn api_images(State(s): S, AxPath(store): AxPath<String>, Query(q): Query<
         "t": pick.iter().map(|&p| ix.t[p]).collect::<Vec<_>>(),
         "rating": pick.iter().map(|&p| ix.rating[p]).collect::<Vec<_>>(),
         "flag": pick.iter().map(|&p| ix.flag[p]).collect::<Vec<_>>(),
+    }))
+    .into_response()
+}
+
+#[derive(Deserialize)]
+struct LikeQuery {
+    k: Option<usize>,
+}
+
+/// More like this: the image first, then the images pand finds most alike,
+/// in the same columns as a set so every view and key works on them. Asks
+/// pand's own index, so it needs no Lab build and works on any store whose
+/// images have embeddings. Hits newer than this page's index are left out
+/// until the index catches up.
+async fn api_like(State(s): S, AxPath((store, id)): AxPath<(String, String)>, Query(q): Query<LikeQuery>) -> Response {
+    if let Err(r) = check(&store).and_then(|_| check(&id)) {
+        return r;
+    }
+    let hits = match s.pand.like(&store, &id, q.k.unwrap_or(300).min(2000)).await {
+        Ok(h) => h,
+        Err((404, _)) => return err(StatusCode::NOT_FOUND, "this image has no embedding yet, so there is nothing to compare it with"),
+        Err((code, msg)) => return err(StatusCode::from_u16(code).unwrap_or(StatusCode::BAD_GATEWAY), msg),
+    };
+    let ix = {
+        let slots = s.slots.lock().unwrap();
+        slots.get(&store).and_then(|x| x.index.clone())
+    };
+    let Some(ix) = ix else {
+        ensure(&s, &store);
+        return err(StatusCode::SERVICE_UNAVAILABLE, "this store's index is still being built");
+    };
+    let ix = ix.read().unwrap();
+    let pick: Vec<(usize, f32)> = std::iter::once((id.clone(), 1.0))
+        .chain(hits)
+        .filter_map(|(h, score)| ix.pos.get(&h).map(|&p| (p as usize, score)))
+        .collect();
+    Json(json!({
+        "store": store,
+        "set": null,
+        "like": id,
+        "built": ix.built,
+        "ids": pick.iter().map(|&(p, _)| &ix.ids[p]).collect::<Vec<_>>(),
+        "t": pick.iter().map(|&(p, _)| ix.t[p]).collect::<Vec<_>>(),
+        "rating": pick.iter().map(|&(p, _)| ix.rating[p]).collect::<Vec<_>>(),
+        "flag": pick.iter().map(|&(p, _)| ix.flag[p]).collect::<Vec<_>>(),
+        "score": pick.iter().map(|&(_, sc)| sc).collect::<Vec<_>>(),
     }))
     .into_response()
 }

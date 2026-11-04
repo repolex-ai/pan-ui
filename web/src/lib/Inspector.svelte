@@ -19,8 +19,11 @@
     cursor: number
     set: string | null
     onset: (set: string | null) => void
+    /** The image "more like this" was asked for, while that list is up. */
+    like: string | null
+    onlike: () => void
   }
-  let { store, images, cursor, set, onset }: Props = $props()
+  let { store, images, cursor, set, onset, like, onlike }: Props = $props()
 
   const id = $derived(images && cursor >= 0 && cursor < images.ids.length ? images.ids[cursor] : null)
   let facts = $state<Facts | null>(null)
@@ -137,6 +140,16 @@
         <span class="stars">{images.rating[cursor] ? '★'.repeat(images.rating[cursor]) : 'no stars'}</span>
         ·
         <span>{images.flag[cursor] > 0 ? 'picked' : images.flag[cursor] < 0 ? 'rejected' : 'no flag'}</span>
+      </p>
+    </Section>
+
+    <Section key="like" title="looks like">
+      <p class="marks">
+        <button onclick={onlike} title="the images that look most like this one, by Pan's embeddings (S)">more like this</button>
+        {#if like && images.score}
+          {#if id === like}<span class="sub">the image the list is for</span>
+          {:else}<span class="sub">{images.score[cursor]?.toFixed(2)} alike {like}</span>{/if}
+        {/if}
       </p>
     </Section>
 
