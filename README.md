@@ -89,19 +89,24 @@ comes back to the same place and a view can be sent to someone.
 
 ## The Lab
 
-The Lab's views read data that `tools/lab_build.py` works out once per store from what Pan
-already wrote beside the images (the embeddings and the body poses). It never writes to the
-store. Build it, then gather the captions for the word search:
+The Lab's views read data that `tools/lab_build.py` works out once per store from what `pand`
+already holds: the embeddings, from `GET /stores/<id>/embeddings`, and the body poses, by a
+SPARQL query. It talks to `pand` over HTTP only (`--pand` gives its address), so Pan can be on
+another machine, and it never writes to the store. Build it, then gather the captions for the
+word search:
 
 ```bash
 uv venv tools/.venv && uv pip install --python tools/.venv/bin/python numpy umap-learn scikit-learn
-tools/.venv/bin/python tools/lab_build.py <store-id>    # about two minutes for 65,000 images
+tools/.venv/bin/python tools/lab_build.py <store-id>    # under two minutes for 70,000 images
 tools/.venv/bin/python tools/lab_words.py <store-id>    # about two minutes for 200,000 images
 ```
 
 Both write to `~/.pan-ui/lab/<store>/`, which can be deleted at any time. The data is a
 snapshot: Pan keeps embedding new images, and the Lab bar says when the snapshot was taken and
-how many newer embeddings `pand` holds. Run the two commands again to catch up.
+how many newer embeddings `pand` holds. Run the two commands again to catch up. The build keeps
+the full embeddings it fetched (`raw.f32`) and next time asks `pand` only for those produced
+since (`?since=`), so catching up downloads hundreds of rows, not the whole store; `--fresh`
+fetches everything again.
 
 The embeddings are kept in memory reduced to 256 dimensions (by PCA), so "what looks like this?"
 is answered in about 50 ms without asking `pand`. Scores in the Lab are in that reduced space,
@@ -177,5 +182,4 @@ pan-ui does not restart it.
 `pan-ui` writes three properties on images, through `pand`'s `/media/{id}/set` and `/unset`:
 `pan:rating`, `pan:isPicked` and `pan:isRejected`. No stars and no flag are removals, not zeros or
 falses. It reaches no other route that changes anything: not delivery, not deletion, not set
-membership. The Lab only reads: from `pand`, from `raveld`, and from the files beside a store's
-images.
+membership. The Lab only reads, from `pand` and from `raveld`, and never from a store's files.
