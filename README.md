@@ -90,8 +90,8 @@ comes back to the same place and a view can be sent to someone.
 ## The Lab
 
 The Lab's views read data that `tools/lab_build.py` works out once per store from what `pand`
-already holds: the embeddings, from `GET /stores/<id>/embeddings`, and the body poses, by a
-SPARQL query. It talks to `pand` over HTTP only (`--pand` gives its address), so Pan can be on
+already holds: the embeddings, from `GET /stores/<id>/embeddings?format=f16` (half precision,
+about 290 MB for 70,000 images; `--format f32` for full), and the body poses, by a SPARQL query. It talks to `pand` over HTTP only (`--pand` gives its address), so Pan can be on
 another machine, and it never writes to the store. Build it, then gather the captions for the
 word search:
 
@@ -105,7 +105,7 @@ Both write to `~/.pan-ui/lab/<store>/`, which can be deleted at any time. The da
 snapshot: Pan keeps embedding new images, and the Lab bar says when the snapshot was taken and
 how many newer embeddings `pand` holds. Run the two commands again to catch up. The build keeps
 the full embeddings it fetched (`raw.f32`) and next time asks `pand` only for those produced
-since (`?since=`), so catching up downloads hundreds of rows, not the whole store; `--fresh`
+since (`?since=`, with `pand`'s own snapshot time, so two machines' clocks never disagree), so catching up downloads hundreds of rows, not the whole store; `--fresh`
 fetches everything again.
 
 The embeddings are kept in memory reduced to 256 dimensions (by PCA), so "what looks like this?"

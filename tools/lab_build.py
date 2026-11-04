@@ -18,8 +18,8 @@ at any time:
                17 joints of x, y, confidence, normalised to the body; pose.json
                says which image each row is
   raw.f32      the full embeddings as pand sent them, and raw.json their ids
-               and when they were asked for: the next build asks pand only
-               for what changed since (GET /stores/<id>/embeddings?since=)
+               and pand's snapshot time: the next build asks pand only for
+               what changed since (GET /stores/<id>/embeddings?since=)
 
 Usage:
   tools/.venv/bin/python tools/lab_build.py <store-id> [--pan-ui http://127.0.0.1:8890] [--pand http://127.0.0.1:7401] [--fresh]
@@ -60,39 +60,50 @@ def image_id(iri: str) -> str:
     return iri.rstrip(">").rsplit("/", 1)[-1]
 
 
-def fetch_vectors(pand: str, store: str, since: str | None):
+def fetch_vectors(pand: str, store: str, since: str | None, fmt: str):
     """Every embedding pand has for the store, or only those produced at or
-    after `since`: one JSON line per image, read as it streams."""
-    url = f"{pand}/stores/{store}/embeddings"
+    after `since`, in pand's binary form: records of [u8 id length][id]
+    [dim numbers], float16 or float32, little-endian. Returns the ids, the
+    vectors as float32, and pand's own snapshot time, which is the `since`
+    for next time (the server's clock, so two machines' clocks never
+    disagree about what is new)."""
+    q = {"format": fmt}
     if since:
-        url += "?since=" + urllib.parse.quote(since)
-    ids, rows = [], []
+        q["since"] = since
+    url = f"{pand}/stores/{store}/embeddings?" + urllib.parse.urlencode(q)
     with urllib.request.urlopen(url, timeout=3600) as r:
-        total = int(r.headers.get("X-Pan-Count") or 0)
-        for n, line in enumerate(r):
-            # {"id":"<pan/Image/x>","vector":[...]}: the numbers are parsed
-            # straight from the text, much faster than a JSON decode per row.
-            head, _, tail = line.partition(b'"vector":[')
-            iid = image_id(head.split(b'"id":"', 1)[1].split(b'"', 1)[0].decode())
+        total = int(r.headers["X-Pan-Count"])
+        dim = int(r.headers["X-Pan-Dim"])
+        dtype = np.dtype("<f2" if r.headers["X-Pan-Dtype"] == "float16" else "<f4")
+        snapshot = r.headers.get("X-Pan-Snapshot")
+        width = dim * dtype.itemsize
+        ids = []
+        x = np.empty((total, dim), np.float32)
+        for n in range(total):
+            iid = r.read(r.read(1)[0]).decode()
+            buf = r.read(width)
+            if len(buf) != width:
+                raise SystemExit(f"pand stopped after {n:,} of {total:,} vectors")
             ids.append(iid)
-            rows.append(np.array(tail.rstrip().rstrip(b"}").rstrip(b"]").split(b","), dtype=np.float32))
-            if n and n % 10000 == 0:
+            x[n] = np.frombuffer(buf, dtype)
+            if n and n % 20000 == 0:
                 log(f"  {n:,} of {total:,} vectors")
-    return ids, rows
+    return ids, x, snapshot
 
 
-def load_vectors(pand: str, store: str, out: Path, fresh: bool):
+def load_vectors(pand: str, store: str, out: Path, fresh: bool, fmt: str):
     """The store's embeddings, kept between builds: the first build fetches
     them all, later ones only what pand produced since the last ask, and
     overwrite by id (a re-embedded image replaces its old vector)."""
     cache, cmeta = out / "raw.f32", out / "raw.json"
+    # pand's snapshot time is what gets kept; this clock is only a fallback.
     asked = datetime.now(timezone.utc).isoformat(timespec="seconds")
     if not fresh and cache.exists() and cmeta.exists():
         m = json.loads(cmeta.read_text())
         x = np.fromfile(cache, np.float32).reshape(len(m["ids"]), m["dim"])
         ids = list(m["ids"])
         log(f"  {len(ids):,} kept from the last build; asking pand for what changed since {m['asked']}")
-        new_ids, new_rows = fetch_vectors(pand, store, m["asked"])
+        new_ids, new_rows, snap = fetch_vectors(pand, store, m["asked"], fmt)
         at = {i: n for n, i in enumerate(ids)}
         add = []
         for i, v in zip(new_ids, new_rows):
@@ -106,11 +117,9 @@ def load_vectors(pand: str, store: str, out: Path, fresh: bool):
             x = np.vstack([x, np.stack([v for _, v in add])])
         log(f"  {len(new_ids):,} changed: {len(add):,} new, {len(new_ids) - len(add):,} re-embedded")
     else:
-        ids, rows = fetch_vectors(pand, store, None)
-        x = np.stack(rows)
-        del rows
+        ids, x, snap = fetch_vectors(pand, store, None, fmt)
     x.tofile(cache)
-    cmeta.write_text(json.dumps({"ids": ids, "dim": int(x.shape[1]), "asked": asked}))
+    cmeta.write_text(json.dumps({"ids": ids, "dim": int(x.shape[1]), "asked": snap or asked}))
     return ids, x
 
 
@@ -241,6 +250,7 @@ def main():
     ap.add_argument("--pan-ui", default="http://127.0.0.1:8890")
     ap.add_argument("--pand", default="http://127.0.0.1:7401")
     ap.add_argument("--fresh", action="store_true", help="fetch every embedding again instead of only what changed")
+    ap.add_argument("--format", default="f16", choices=["f16", "f32"], help="half precision is all the Lab needs and half the download")
     ap.add_argument("--out", default=str(Path.home() / ".pan-ui/lab"))
     a = ap.parse_args()
 
@@ -255,7 +265,7 @@ def main():
     when = dict(zip(cols["ids"], cols["t"]))
 
     log("embeddings from pand")
-    ids, x = load_vectors(a.pand, a.store, out, a.fresh)
+    ids, x = load_vectors(a.pand, a.store, out, a.fresh, a.format)
     t = [when.get(i, 0) for i in ids]
     log(f"{len(ids):,} vectors of {x.shape[1]} dimensions; {sum(1 for v in t if v == 0):,} without a date")
 
