@@ -43,11 +43,14 @@ For frontend work, run `npm run dev` in `web/` as well. Vite serves the page on
 | `E` | full size |
 | `G` `Esc` | back to the grid |
 | `R` | a random image from the set, among those the filter shows; for finding older work that browsing newest-first never reaches |
+| `Shift` + `R` | back to the image you were on before the last `R`; press again to keep going back |
 | `1`–`5` | stars |
 | `0` | no stars |
 | `P` | pick (white flag) |
 | `X` | reject (black flag) |
 | `U` | no flag |
+| `Shift` + `↑` | flag one step toward pick: reject becomes no flag, no flag becomes pick |
+| `Shift` + `↓` | flag one step toward reject: pick becomes no flag, no flag becomes reject |
 | `Shift` + any mark | mark, then move to the next image |
 | `=` `-` | bigger / smaller thumbnails |
 | `Tab` | hide / show both side panels |
