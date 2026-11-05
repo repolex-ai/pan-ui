@@ -277,8 +277,35 @@
   function jump() {
     const n = images?.ids.length ?? 0
     if (n < 2) return
+    const here = images!.ids[cursor]
+    if (here && jumpedFrom.at(-1) !== here) jumpedFrom = [...jumpedFrom, here].slice(-200)
     const k = Math.floor(Math.random() * (n - 1))
     move(k >= cursor ? k + 1 : k)
+  }
+
+  // The images R left, latest last. Shift-R walks back through them, so
+  // something glimpsed one R ago is not gone. Kept by id: a mark or a new
+  // filter can move an image in the list, and one no longer shown is
+  // stepped over.
+  let jumpedFrom: string[] = []
+  function jumpBack() {
+    if (!images) return
+    while (jumpedFrom.length) {
+      const id = jumpedFrom[jumpedFrom.length - 1]
+      jumpedFrom = jumpedFrom.slice(0, -1)
+      const k = images.ids.indexOf(id)
+      if (k >= 0 && k !== cursor) return move(k)
+    }
+    say('no random jump to go back to')
+  }
+
+  /** Shift-Up and Shift-Down step the flag: up toward pick, down toward
+   *  reject, through no flag on the way (goodlux, 2026-11-04). */
+  function stepFlag(up: boolean) {
+    if (!images || !loaded) return
+    const j = images.src ? images.src[cursor] : cursor
+    const f = loaded.flag[j] ?? 0
+    apply({ flag: up ? (f < 0 ? 0 : 1) : f > 0 ? 0 : -1 }, false)
   }
 
   /** Change the image's column at once; the server queues it for Pan. */
@@ -333,9 +360,11 @@
     else if (e.code === 'KeyU') apply({ flag: 0 }, adv)
     else if (e.key === 'ArrowRight') move(cursor + 1)
     else if (e.key === 'ArrowLeft') move(cursor - 1)
+    else if (e.key === 'ArrowUp' && adv) stepFlag(true)
+    else if (e.key === 'ArrowDown' && adv) stepFlag(false)
     else if (e.key === 'ArrowDown') move(cursor + (mode === 'grid' ? cols : 1))
     else if (e.key === 'ArrowUp') move(cursor - (mode === 'grid' ? cols : 1))
-    else if (e.code === 'KeyR' && !adv) jump()
+    else if (e.code === 'KeyR') adv ? jumpBack() : jump()
     else if (e.code === 'KeyS' && !adv) moreLike()
     else if (e.key === 'Backspace' && like) leaveLike()
     else if (e.key === 'Home') move(0)
