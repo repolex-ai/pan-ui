@@ -42,8 +42,8 @@ For frontend work, run `npm run dev` in `web/` as well. Vite serves the page on
 | `Enter` `Space` | full size, and back |
 | `E` | full size |
 | `G` `Esc` | back to the grid |
-| `R` | a random image from the set, among those the filter shows; for finding older work that browsing newest-first never reaches |
-| `Shift` + `R` | back to the image you were on before the last `R`; press again to keep going back |
+| `R` or `\` | a random image from the set, among those the filter shows; for finding older work that browsing newest-first never reaches |
+| `Shift` + `R` or `\` | back to the image you were on before the last random jump; press again to keep going back |
 | `1`–`5` | stars |
 | `0` | no stars |
 | `P` | pick (white flag) |

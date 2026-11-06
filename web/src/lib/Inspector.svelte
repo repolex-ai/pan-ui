@@ -210,8 +210,8 @@
           <tr><td><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></td><td>move</td></tr>
           <tr><td><kbd>Enter</kbd> <kbd>Space</kbd></td><td>full size / back</td></tr>
           <tr><td><kbd>G</kbd> <kbd>Esc</kbd></td><td>grid</td></tr>
-          <tr><td><kbd>R</kbd></td><td>a random image from the set</td></tr>
-          <tr><td><kbd>⇧</kbd> <kbd>R</kbd></td><td>back to the image before the last R</td></tr>
+          <tr><td><kbd>R</kbd> <kbd>\</kbd></td><td>a random image from the set</td></tr>
+          <tr><td><kbd>⇧</kbd> <kbd>R</kbd> <kbd>\</kbd></td><td>back to the image before the last R</td></tr>
           <tr><td><kbd>1</kbd>–<kbd>5</kbd> <kbd>0</kbd></td><td>stars / none</td></tr>
           <tr><td><kbd>P</kbd> <kbd>X</kbd> <kbd>U</kbd></td><td>pick / reject / no flag</td></tr>
           <tr><td><kbd>,</kbd> <kbd>.</kbd></td><td>flag one step toward pick / reject</td></tr>

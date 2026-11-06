@@ -336,7 +336,8 @@
     else if (e.code === 'Period') stepFlag(false)
     else if (e.key === 'ArrowDown') move(cursor + (mode === 'grid' ? cols : 1))
     else if (e.key === 'ArrowUp') move(cursor - (mode === 'grid' ? cols : 1))
-    else if (e.code === 'KeyR') adv ? jumpBack() : jump()
+    // \ is R for the right hand, by the arrows (goodlux, 2026-11-06).
+    else if (e.code === 'KeyR' || e.code === 'Backslash') adv ? jumpBack() : jump()
     else if (e.key === 'Home') move(0)
     else if (e.key === 'End') move(Infinity)
     else if (e.key === 'PageDown' && mode === 'grid') move(cursor + cols * 4)
