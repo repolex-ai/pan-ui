@@ -3,6 +3,7 @@
   import LeftRail from './lib/LeftRail.svelte'
   import Grid from './lib/Grid.svelte'
   import Loupe from './lib/Loupe.svelte'
+  import MarkToast from './lib/MarkToast.svelte'
   import Inspector from './lib/Inspector.svelte'
   import Config from './lib/Config.svelte'
   import Filmstrip from './lib/Filmstrip.svelte'
@@ -299,14 +300,33 @@
     say('no random jump to go back to')
   }
 
-  /** Shift-Up and Shift-Down step the flag: up toward pick, down toward
-   *  reject, through no flag on the way (goodlux, 2026-11-04). */
-  function stepFlag(up: boolean) {
-    if (!images || !loaded) return
+  /** The marks of the image under the cursor, from the whole set. */
+  function marksHere() {
+    if (!images || !loaded) return null
     const j = images.src ? images.src[cursor] : cursor
-    const f = loaded.flag[j] ?? 0
-    apply({ flag: up ? (f < 0 ? 0 : 1) : f > 0 ? 0 : -1 }, false)
+    return { rating: loaded.rating[j] ?? 0, flag: loaded.flag[j] ?? 0 }
   }
+
+  /** , and . step the flag: , toward pick, . toward reject, through no
+   *  flag on the way. P X U stay for Lightroom hands; these sit together,
+   *  so flagging needs no looking down (goodlux, 2026-11-05). */
+  function stepFlag(toPick: boolean) {
+    const m = marksHere()
+    if (!m) return
+    apply({ flag: toPick ? (m.flag < 0 ? 0 : 1) : m.flag > 0 ? 0 : -1 }, false)
+  }
+
+  /** Shift-Up and Shift-Down step the stars, with 3 as average: an
+   *  unrated image goes to 4 or 2 on the first press, then one star at a
+   *  time between 1 and 5. Back to unrated is 0 (goodlux, 2026-11-05). */
+  function stepRating(up: boolean) {
+    const m = marksHere()
+    if (!m) return
+    const r = m.rating === 0 ? (up ? 4 : 2) : Math.max(1, Math.min(5, m.rating + (up ? 1 : -1)))
+    apply({ rating: r }, false)
+  }
+
+  let toast = $state<{ kind: 'rating' | 'flag'; rating: number; flag: number; n: number } | null>(null)
 
   /** Change the image's column at once; the server queues it for Pan. */
   function apply(m: { rating?: number; flag?: number }, advance: boolean) {
@@ -326,6 +346,7 @@
       flag[j] = m.flag
     }
     loaded = { ...loaded, rating, flag }
+    toast = { kind: m.flag !== undefined ? 'flag' : 'rating', rating: rating[j], flag: flag[j], n: (toast?.n ?? 0) + 1 }
     mark(current.id, [id], m).then(
       (r) => {
         markError = null
@@ -360,8 +381,10 @@
     else if (e.code === 'KeyU') apply({ flag: 0 }, adv)
     else if (e.key === 'ArrowRight') move(cursor + 1)
     else if (e.key === 'ArrowLeft') move(cursor - 1)
-    else if (e.key === 'ArrowUp' && adv) stepFlag(true)
-    else if (e.key === 'ArrowDown' && adv) stepFlag(false)
+    else if (e.key === 'ArrowUp' && adv) stepRating(true)
+    else if (e.key === 'ArrowDown' && adv) stepRating(false)
+    else if (e.code === 'Comma') stepFlag(true)
+    else if (e.code === 'Period') stepFlag(false)
     else if (e.key === 'ArrowDown') move(cursor + (mode === 'grid' ? cols : 1))
     else if (e.key === 'ArrowUp') move(cursor - (mode === 'grid' ? cols : 1))
     else if (e.code === 'KeyR') adv ? jumpBack() : jump()
@@ -504,6 +527,7 @@
       {:else if current}
         <p class="state">reading {current.name}…</p>
       {/if}
+      {#if toast}<MarkToast {...toast} />{/if}
       </div>
     </main>
 
