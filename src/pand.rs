@@ -154,6 +154,34 @@ impl Pand {
             .unwrap_or_default())
     }
 
+    /// The store's images changed since `since` (pand's own snapshot from
+    /// the last call), with their marks as they are now, and the snapshot
+    /// to ask from next time. Rows are (id, rating, flag). A `since` in the
+    /// future gives no rows, only the snapshot: how to start the clock.
+    pub async fn changed(&self, store: &str, since: &str) -> Result<(Vec<(String, u8, i8)>, String), String> {
+        // An RFC3339 time: only + and : need escaping in a query string.
+        let since = since.replace('+', "%2B").replace(':', "%3A");
+        let v = self.get(&format!("/stores/{store}/images?since={since}")).await?;
+        let snapshot = v.get("snapshot").and_then(Value::as_str).ok_or("pand: no snapshot in /images")?.to_string();
+        let rows = v
+            .get("images")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|r| {
+                        let id = r.get("id")?.as_str()?.strip_prefix("<pan/Image/")?.strip_suffix('>')?.to_string();
+                        let rating = r.get("rating").and_then(Value::as_u64).unwrap_or(0).min(5) as u8;
+                        let on = |k: &str| r.get(k).and_then(Value::as_bool) == Some(true);
+                        // A reject wins over a pick, as in the index.
+                        let flag = if on("is_rejected") { -1 } else if on("is_picked") { 1 } else { 0 };
+                        Some((id, rating, flag))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok((rows, snapshot))
+    }
+
     pub async fn set(&self, id: &str, fields: Value) -> Result<(), String> {
         self.post(&format!("/media/{id}/set"), fields).await
     }

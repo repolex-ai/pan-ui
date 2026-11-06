@@ -28,7 +28,7 @@ use pand::{Pand, valid_id};
 use queue::{Mark, Queue};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
@@ -93,6 +93,8 @@ struct Slot {
     index: Option<Arc<RwLock<Index>>>,
     building: bool,
     error: Option<String>,
+    /// pand's snapshot from the last changes call: ask from here next time.
+    since: Option<String>,
 }
 
 type S = State<Arc<AppState>>;
@@ -243,8 +245,13 @@ async fn rebuild(s: Arc<AppState>, store: String) {
         let mut slots = s.slots.lock().unwrap();
         slots.entry(store.clone()).or_default().building = true;
     }
+    // Start the changes clock before the listing is read, so a mark made
+    // while it is being read comes in on the next poll instead of being
+    // lost between the two. Seeing a change twice does no harm.
+    let since = s.pand.changed(&store, "9999-01-01T00:00:00Z").await.ok().map(|(_, snap)| snap);
     match Index::build(&s.pand, &store).await {
         Ok(ix) => {
+            s.slots.lock().unwrap().entry(store.clone()).or_default().since = since;
             let body = serde_json::to_vec(&ix);
             let path = cache_path(&s, &store);
             install(&s, &store, ix, false);
@@ -294,7 +301,10 @@ fn apply(ix: &mut Index, id: &str, m: Mark) {
 
 /// Every minute, compare each open store's image count with pand's, and
 /// rebuild the index of any store that has changed. New images arrive all
-/// the time (Horae delivers them); this is how they show up.
+/// the time (Horae delivers them); this is how they show up. Every other
+/// open store asks pand which images changed since last time, so ratings
+/// and flags set anywhere else (the pan command, another client) show up
+/// too.
 async fn watch(s: Arc<AppState>) {
     loop {
         tokio::time::sleep(Duration::from_secs(60)).await;
@@ -320,9 +330,57 @@ async fn watch(s: Arc<AppState>) {
                 })
                 .collect()
         };
+        let fresh: Vec<(String, String)> = {
+            let slots = s.slots.lock().unwrap();
+            slots
+                .iter()
+                .filter(|(store, slot)| !slot.building && slot.index.is_some() && !stale.contains(store))
+                .filter_map(|(store, slot)| Some((store.clone(), slot.since.clone()?)))
+                .collect()
+        };
         for store in stale {
             rebuild(Arc::clone(&s), store).await;
         }
+        for (store, since) in fresh {
+            take_changes(&s, &store, &since).await;
+        }
+    }
+}
+
+/// Lay pand's changed marks into the index, under the marks still waiting
+/// to save (those are newer). `built` moves on only if something differs,
+/// which is what tells an open page to reload. An image the index has never
+/// seen means the listing itself is out of date: rebuild.
+async fn take_changes(s: &Arc<AppState>, store: &str, since: &str) {
+    let Ok((rows, snapshot)) = s.pand.changed(store, since).await else { return };
+    let Some(slot) = s.slots.lock().unwrap().get(store).and_then(|x| x.index.clone()) else { return };
+    let pending: HashSet<String> = s.queue.pending_for(store).into_iter().map(|(id, _)| id).collect();
+    let mut unknown = false;
+    {
+        let mut ix = slot.write().unwrap();
+        let mut moved = false;
+        for (id, rating, flag) in rows {
+            let Some(&p) = ix.pos.get(&id) else {
+                unknown = true;
+                continue;
+            };
+            let p = p as usize;
+            if pending.contains(&id) || (ix.rating[p] == rating && ix.flag[p] == flag) {
+                continue;
+            }
+            ix.rating[p] = rating;
+            ix.flag[p] = flag;
+            moved = true;
+        }
+        if moved {
+            ix.built = chrono::Utc::now().to_rfc3339();
+        }
+    }
+    if let Some(slot) = s.slots.lock().unwrap().get_mut(store) {
+        slot.since = Some(snapshot);
+    }
+    if unknown {
+        rebuild(Arc::clone(s), store.to_string()).await;
     }
 }
 
