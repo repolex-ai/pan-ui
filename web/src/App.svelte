@@ -235,6 +235,15 @@
   // something glimpsed one R ago is not gone. Kept by id: a mark or a new
   // filter can move an image in the list, and one no longer shown is
   // stepped over.
+  let notice = $state<string | null>(null)
+  let noticeTimer: ReturnType<typeof setTimeout> | undefined
+  /** A word in the top bar for a moment. */
+  function say(msg: string) {
+    notice = msg
+    clearTimeout(noticeTimer)
+    noticeTimer = setTimeout(() => (notice = null), 6000)
+  }
+
   let jumpedFrom: string[] = []
   function jumpBack() {
     if (!images) return
@@ -421,8 +430,10 @@
         {/if}
       </span>
     {/if}
-    <span class="save" class:warn={markError || queue?.last_error}>
-      {#if markError}
+    <span class="save" class:warn={notice || markError || queue?.last_error}>
+      {#if notice}
+        {notice}
+      {:else if markError}
         {markError}
       {:else if queue?.last_error}
         {queue.pending} waiting to save · {queue.last_error}
