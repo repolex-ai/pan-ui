@@ -2,7 +2,7 @@
   // What a key just did to the image, at the foot of the stage, so the
   // result reads at a glance without looking away to find the badge. Only
   // the mark that changed: five star places for a rating, the flag itself
-  // (white pick, black reject, empty outline for none) for a flag. Brief:
+  // (white pick, black reject, an outline struck through for none) for a flag. Brief:
   // it only says the mark took.
   interface Props {
     kind: 'rating' | 'flag'
@@ -22,7 +22,8 @@
       </span>
     {:else}
       <svg class:pick={flag > 0} class:none={flag === 0} viewBox="0 0 12 14" aria-label={flag > 0 ? 'picked' : flag < 0 ? 'rejected' : 'no flag'}>
-        <path d="M2 1v12" /><path d="M2 1.5h8l-2 3 2 3H2z" />
+        <path class="pole" d="M2 1v12" /><path class="cloth" d="M2 1.5h8l-2 3 2 3H2z" />
+        {#if flag === 0}<line x1="0.6" y1="13" x2="11.4" y2="1" />{/if}
       </svg>
     {/if}
   </div>
@@ -48,10 +49,11 @@
   }
   .stars { font-size: 34px; line-height: 40px; letter-spacing: 5px; color: #555; }
   .stars .on { color: #f2d36b; }
-  svg { width: 34px; height: 40px; stroke-width: 1.1; stroke-linejoin: round; }
-  path:first-child { stroke: #fff; fill: none; }
-  path:last-child { fill: #000; stroke: #fff; }
-  .pick path:last-child { fill: #fff; }
+  svg { overflow: visible; width: 34px; height: 40px; stroke-width: 1.1; stroke-linejoin: round; }
+  .pole { stroke: #fff; fill: none; }
+  .cloth { fill: #000; stroke: #fff; }
+  .pick .cloth { fill: #fff; }
   .none path { stroke: #999; }
-  .none path:last-child { fill: none; }
+  .none .cloth { fill: none; }
+  line { stroke: #e0604f; stroke-width: 1.3; stroke-linecap: round; }
 </style>
