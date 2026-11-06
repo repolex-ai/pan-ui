@@ -49,8 +49,10 @@ For frontend work, run `npm run dev` in `web/` as well. Vite serves the page on
 | `P` | pick (white flag) |
 | `X` | reject (black flag) |
 | `U` | no flag |
-| `Shift` + `↑` | flag one step toward pick: reject becomes no flag, no flag becomes pick |
-| `Shift` + `↓` | flag one step toward reject: pick becomes no flag, no flag becomes reject |
+| `,` (`<`) | flag one step toward pick: reject becomes no flag, no flag becomes pick |
+| `.` (`>`) | flag one step toward reject: pick becomes no flag, no flag becomes reject |
+| `Shift` + `↑` | one star more; an unrated image gets 4, as 3 is average. Stops at 5 |
+| `Shift` + `↓` | one star less; an unrated image gets 2. Stops at 1; `0` clears |
 | `Shift` + any mark | mark, then move to the next image |
 | `=` `-` | bigger / smaller thumbnails |
 | `Tab` | hide / show both side panels |

@@ -214,7 +214,8 @@
           <tr><td><kbd>⇧</kbd> <kbd>R</kbd></td><td>back to the image before the last R</td></tr>
           <tr><td><kbd>1</kbd>–<kbd>5</kbd> <kbd>0</kbd></td><td>stars / none</td></tr>
           <tr><td><kbd>P</kbd> <kbd>X</kbd> <kbd>U</kbd></td><td>pick / reject / no flag</td></tr>
-          <tr><td><kbd>⇧</kbd> <kbd>↑</kbd> <kbd>↓</kbd></td><td>flag one step toward pick / reject</td></tr>
+          <tr><td><kbd>,</kbd> <kbd>.</kbd></td><td>flag one step toward pick / reject</td></tr>
+          <tr><td><kbd>⇧</kbd> <kbd>↑</kbd> <kbd>↓</kbd></td><td>one star more / less (unrated: 4 / 2)</td></tr>
           <tr><td><kbd>⇧</kbd> + any mark</td><td>mark, then next</td></tr>
           <tr><td><kbd>=</kbd> <kbd>-</kbd></td><td>bigger / smaller thumbnails</td></tr>
           <tr><td><kbd>Tab</kbd></td><td>hide / show side panels</td></tr>
