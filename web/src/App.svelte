@@ -263,13 +263,15 @@
     apply({ flag: toPick ? (m.flag < 0 ? 0 : 1) : m.flag > 0 ? 0 : -1 }, false)
   }
 
-  /** Shift-Up and Shift-Down step the stars, with 3 as average: an
-   *  unrated image goes to 4 or 2 on the first press, then one star at a
-   *  time between 1 and 5. Back to unrated is 0 (goodlux, 2026-11-05). */
+  /** Shift-Up and Shift-Down step the stars, with 3 as average. Most
+   *  images are average or liked, so each is one press from unrated:
+   *  Shift-Down gives 3, Shift-Up 4. Then one star at a time between 1
+   *  and 5, so 2 and 5 are two presses and 1 is three. Back to unrated
+   *  is 0 (goodlux, 2026-11-06). */
   function stepRating(up: boolean) {
     const m = marksHere()
     if (!m) return
-    const r = m.rating === 0 ? (up ? 4 : 2) : Math.max(1, Math.min(5, m.rating + (up ? 1 : -1)))
+    const r = m.rating === 0 ? (up ? 4 : 3) : Math.max(1, Math.min(5, m.rating + (up ? 1 : -1)))
     apply({ rating: r }, false)
   }
 
